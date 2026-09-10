@@ -129,9 +129,9 @@ func TestDecodeFrameRejectsCorruption(t *testing.T) {
 func TestStripRetcode(t *testing.T) {
 	t.Run("zero retcode", func(t *testing.T) {
 		payload := append([]byte{0, 0, 0, 0}, []byte(`{"dps":{}}`)...)
-		got, err := stripRetcode(payload)
+		got, err := StripRetcode(payload)
 		if err != nil {
-			t.Fatalf("stripRetcode: %v", err)
+			t.Fatalf("StripRetcode: %v", err)
 		}
 		if string(got) != `{"dps":{}}` {
 			t.Errorf("got %q, want %q", got, `{"dps":{}}`)
@@ -140,13 +140,13 @@ func TestStripRetcode(t *testing.T) {
 
 	t.Run("nonzero retcode", func(t *testing.T) {
 		payload := []byte{0, 0, 0, 1, 0x7b, 0x7d}
-		if _, err := stripRetcode(payload); err == nil {
+		if _, err := StripRetcode(payload); err == nil {
 			t.Error("expected error for nonzero retcode")
 		}
 	})
 
 	t.Run("payload too short", func(t *testing.T) {
-		if _, err := stripRetcode([]byte{0, 0}); err == nil {
+		if _, err := StripRetcode([]byte{0, 0}); err == nil {
 			t.Error("expected error for payload shorter than retcode")
 		}
 	})

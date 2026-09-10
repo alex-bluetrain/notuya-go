@@ -178,7 +178,7 @@ func (s *Session) Command(ctx context.Context, cmd uint32, payload []byte, wait 
 	if err != nil {
 		return nil, err
 	}
-	return stripRetcode(df.Payload)
+	return StripRetcode(df.Payload)
 }
 
 // DrainInbound reads and discards inbound frames until ctx is cancelled or

@@ -46,7 +46,7 @@ func encodeRequest(key, iv []byte, seqno, cmd uint32, plaintext []byte) ([]byte,
 
 // decodedFrame is a parsed and decrypted 6699 frame. Payload is the raw
 // plaintext — for response frames it still carries the 4-byte retcode
-// prefix; callers use stripRetcode to remove it.
+// prefix; callers use StripRetcode to remove it.
 type decodedFrame struct {
 	Seqno   uint32
 	Cmd     uint32
@@ -93,10 +93,10 @@ func decodeFrame(key, frame []byte) (*decodedFrame, error) {
 	return &decodedFrame{Seqno: seqno, Cmd: cmd, Payload: plaintext}, nil
 }
 
-// stripRetcode removes the 4-byte status-code prefix that response
+// StripRetcode removes the 4-byte status-code prefix that response
 // payloads (device -> client) carry ahead of the actual body, and returns
 // an error if the device reported a non-zero (failure) code.
-func stripRetcode(payload []byte) ([]byte, error) {
+func StripRetcode(payload []byte) ([]byte, error) {
 	if len(payload) < retcodeLen {
 		return nil, fmt.Errorf("%w: response payload too short for retcode", ErrBadFrame)
 	}

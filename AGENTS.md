@@ -142,9 +142,31 @@ ordinary blocking commands, or it would swallow their responses.
 - Unsolicited: listen on UDP/6667, 6699 frames with the fixed key.
 - Solicited: broadcast `{"from":"app","ip":"<my-ip>"}` as a 6699 frame (cmd `REQ_DEVINFO=0x25`) to UDP/7000.
 
-> **Note**: the scanner does not work on every network (AP isolation,
-> segmentation). Direct control by IP always works. If the scanner fails,
-> use fixed IPs in `config.json`.
+Four things the scanner gets wrong if written naively — each one produced
+an empty scan that looked exactly like a network limitation:
+
+- **Replies carry a retcode.** A solicited reply (UDP/7000) prefixes the
+  JSON with the same 4-byte retcode as any device-originated frame, so it
+  needs `StripRetcode`; the unsolicited announcements on UDP/6667 do not,
+  so stripping unconditionally corrupts those instead. `parseAnnouncement`
+  handles both.
+- **The advertised IP must match the interface the request leaves by.**
+  The request tells the device where to reply. With several interfaces on
+  one subnet, an unbound socket announces one address while the kernel
+  routes the packet out of another, and the reply goes somewhere nobody is
+  listening. Send one request per interface, bound to it, advertising its
+  own address.
+- **One request is not enough.** Devices ignore the first couple after a
+  period of quiet — measured at ~3s before any answer — and UDP guarantees
+  nothing. `solicitRepeatedly` re-sends every 1.5s for the whole window.
+- **The request comes back to you.** It is broadcast on the port the
+  replies arrive on. It has no `gwId`, which is what filters it out.
+
+> **Note**: broadcast genuinely does not reach devices on some networks
+> (AP isolation, segmentation). Direct control by IP always works, so
+> fixed IPs in `config.json` are always a fallback. Confirm a scan failure
+> is the network before assuming it: the bugs above all presented
+> identically.
 
 ## Configuration
 

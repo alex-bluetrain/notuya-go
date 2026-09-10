@@ -32,7 +32,10 @@ const usage = `Usage:
   notuya scan
 `
 
-const scanTimeout = 10 * time.Second
+// scanTimeout is generous because devices ignore the first couple of
+// solicitations after a period of quiet — measured at roughly three
+// seconds before any of them answer.
+const scanTimeout = 15 * time.Second
 
 const commandTimeout = 10 * time.Second
 

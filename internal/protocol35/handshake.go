@@ -36,7 +36,7 @@ func parseStep2(localKey, localNonce, frame []byte) (remoteNonce []byte, err err
 	if df.Cmd != protocol.SessKeyNegResp {
 		return nil, fmt.Errorf("protocol35: expected cmd %d (SESS_KEY_NEG_RESP), got %d", protocol.SessKeyNegResp, df.Cmd)
 	}
-	payload, err := stripRetcode(df.Payload)
+	payload, err := StripRetcode(df.Payload)
 	if err != nil {
 		return nil, err
 	}

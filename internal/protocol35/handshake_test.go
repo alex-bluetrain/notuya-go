@@ -124,9 +124,9 @@ func TestHandshakeAgainstRealCapture(t *testing.T) {
 		if df.Cmd != protocol.DPQueryNew {
 			t.Errorf("cmd = %d, want %d (DP_QUERY_NEW)", df.Cmd, protocol.DPQueryNew)
 		}
-		payload, err := stripRetcode(df.Payload)
+		payload, err := StripRetcode(df.Payload)
 		if err != nil {
-			t.Fatalf("stripRetcode: %v", err)
+			t.Fatalf("StripRetcode: %v", err)
 		}
 		if string(payload) != f.FrameDPQueryRespPlaintext {
 			t.Errorf("payload mismatch\n got: %s\nwant: %s", payload, f.FrameDPQueryRespPlaintext)

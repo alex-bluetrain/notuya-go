@@ -86,13 +86,16 @@ not a faster drag.
 
 ### `notuya scan`
 
-Listens for Tuya discovery broadcasts (unsolicited UDP/6667, solicited
-UDP/7000) for 10s. On some networks (APs with client isolation, or that do
-not forward broadcast between segments) this finds nothing — that is a
-network limitation, not a protocol one: in this project's development
-environment, neither `notuya scan` nor `python -m tinytuya scan` (the
-official reference) find the devices via broadcast, even though direct
-control by IP (`on`/`off`/`color`/etc.) works fine against those same
-bulbs. If the same happens to you, use fixed `ip_address` values in
-`config.json` (or a MAC-based DHCP reservation on your router) instead of
-relying on the scanner.
+Finds devices on the LAN and prints `device_id`, IP and protocol version,
+which is what `config.json` needs. It both listens for the announcements
+devices broadcast on UDP/6667 and asks for them on UDP/7000, repeating the
+request until the scan window closes: devices ignore the first couple of
+requests after a period of quiet, and a single one is easily lost.
+
+The scan takes ~15s. Devices typically answer around three seconds in.
+
+On networks where broadcast does not reach the devices (APs with client
+isolation, or segments that do not forward broadcast) this legitimately
+finds nothing. Direct control by IP works regardless, so fixed
+`ip_address` values in `config.json` — ideally with a MAC-based DHCP
+reservation — are always an option.
