@@ -326,3 +326,24 @@ stuck in music mode.
 Known limitations: no reconnect if a device drops mid-stream (it is reported
 and that device stops), and colour-temperature/white-mode dragging is not
 supported — only RGB.
+
+## Working in this repo
+
+**Always give `rg` a path argument.** With no path it reads stdin and blocks
+forever:
+
+```bash
+rg -n 'pattern' --glob '*.go' .    # the trailing . is not optional
+```
+
+The failure is easy to misread. It surfaces as **exit 128 with no output at
+all** — not even from `echo` statements chained after it with `;`, because
+the shell never gets that far. 128 means killed by a signal, so what is
+actually being observed is someone pressing Ctrl-C on a hung process, not
+`rg` reporting an error. Do not "work around" it by switching to `grep`:
+that hides a hang, and the same trap applies to any command that falls back
+to stdin.
+
+The shell here is **bash**, even though the user's login shell is fish, so
+`$?` and other bashisms behave normally. `$SHELL` says fish and is
+misleading; `${BASH_VERSION}` is the reliable check.
