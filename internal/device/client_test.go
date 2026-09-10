@@ -40,7 +40,7 @@ func TestControlPayloadShape(t *testing.T) {
 	c := newClient(mock)
 
 	dps := map[string]any{"20": true, "21": "colour"}
-	if err := c.control(context.Background(), dps); err != nil {
+	if err := c.control(context.Background(), dps, true); err != nil {
 		t.Fatalf("control: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestControlPayloadSingleDP(t *testing.T) {
 	mock := &mockSession{}
 	c := newClient(mock)
 
-	if err := c.control(context.Background(), map[string]any{"20": false}); err != nil {
+	if err := c.control(context.Background(), map[string]any{"20": false}, true); err != nil {
 		t.Fatalf("control: %v", err)
 	}
 

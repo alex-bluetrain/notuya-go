@@ -139,7 +139,7 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan RGB, opts Strea
 		if err != nil {
 			return err
 		}
-		if err := b.client.controlNoWait(ctx, map[string]any{dpMusic: hex}); err != nil {
+		if err := b.client.control(ctx, map[string]any{dpMusic: hex}, false); err != nil {
 			return fmt.Errorf("device: %s: streaming colour: %w", b.Name, err)
 		}
 		return nil

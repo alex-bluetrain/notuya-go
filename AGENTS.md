@@ -206,6 +206,47 @@ with the Python project's `config.json`.
   silently: fire-and-forget sends never look at the error.
 - Warm-up with `Status()` (a throwaway query) before the real command — mirrors `ctl.py`'s pattern.
 - Color conversion: an exact port of Python's `colorsys.rgb_to_hsv`, with truncation (not rounding) for bit-for-bit parity with tinytuya.
+- Every device command reports success per device *and* in the exit status.
+  `forEachDevice` returns whether all of them succeeded and the CLI exits 1
+  if not. Printing `FAIL:` to stderr and exiting 0 is invisible to a script
+  wrapping the binary; it was the behaviour of every command except `music`.
+
+## Decisions taken against tinytuya
+
+The implementation was checked line by line against `tinytuya`'s `Device.py`
+and `XenonDevice.py`. Most of what is missing here is missing on purpose.
+
+**Not adopted.** `XenonDevice` carries 20+ configuration methods
+(`set_socketPersistent`, `set_socketNODELAY`, `set_socketRetryLimit`,
+`set_socketRetryDelay`, `set_socketTimeout`, `set_sendWait`,
+`cached_status`, `detect_available_dps`…), each one a flag multiplying the
+reachable states. `protocol.Session` has three methods. That is the point
+of this codebase, and feature parity is not a reason to give it up. Same
+for generic `set_value`/`updatedps`: they would dissolve `device` as the
+layer that knows what each DP *means*, which is the only reason the CLI
+never touches a DP number.
+
+**Deferred, with a known trigger.**
+
+- `frame.go` does framing and crypto in one file, where tinytuya splits
+  `message_helper` from `crypto_helper`. They are right that these are two
+  concerns, but the split only pays off with a second cipher: 3.3 uses
+  AES-ECB instead of GCM. Splitting now would be designing for a version
+  nobody has written. It is the first cut to make when 3.1/3.3 lands.
+- `max_simultaneous_dps` (`Device.py:141-153`): when a multi-DP `CONTROL`
+  comes back `Err`, tinytuya retries one DP at a time and permanently lowers
+  its limit. `SetColour` sends DP 21+24 together and `SetBrightnessPercent`
+  DP 21+22; the A60TY10W accepts both. Adaptive state for hardware that is
+  not on this LAN is not worth carrying, but this is the likeliest thing to
+  break on a different model — the symptom is a set that returns an error
+  payload while each DP works alone.
+
+**Where tinytuya is structurally worse.** Composition instead of
+inheritance (`Bulb` → `client` → `Session`, not `Device(XenonDevice)`), and
+version-as-package instead of `if self.version` scattered through the
+methods. Worth an honest caveat: this stays clean partly because the
+problem is smaller. tinytuya carries five protocol versions, a cloud API and
+dozens of device types. Nothing has yet failed to fit behind `Session`.
 
 ## Testing
 
@@ -225,6 +266,7 @@ NOTUYA_INTEGRATION=1 \
 - `device/music_test.go`: DP 28 encoding, streaming payload shape, latest-wins coalescing, drain shutdown.
 - `discovery/discovery_test.go`: fixed discovery key validation, plus the announcement parsing each scanner bug hid in — retcode-prefixed replies, bare announcements, our own request echoed back, duplicate broadcast targets.
 - `cmd/notuya/music_test.go`: the stdin broadcast never blocks and keeps the newest colour.
+- `cmd/notuya/foreach_test.go`: a failing device makes the CLI exit non-zero. Uses `192.0.2.1` (RFC 5737 TEST-NET-1, guaranteed unroutable) and shortens `commandTimeout`, which is a `var` only so this test does not spend 10s per dial.
 - Integration tests gated behind `NOTUYA_INTEGRATION` so `go test ./...` is hermetic by default.
 
 The streaming path is also covered **without hardware**:

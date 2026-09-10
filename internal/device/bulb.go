@@ -50,12 +50,12 @@ func (b *Bulb) Status(ctx context.Context) error {
 
 // TurnOn switches the bulb on.
 func (b *Bulb) TurnOn(ctx context.Context) error {
-	return b.client.control(ctx, map[string]any{dpSwitch: true})
+	return b.client.control(ctx, map[string]any{dpSwitch: true}, true)
 }
 
 // TurnOff switches the bulb off.
 func (b *Bulb) TurnOff(ctx context.Context) error {
-	return b.client.control(ctx, map[string]any{dpSwitch: false})
+	return b.client.control(ctx, map[string]any{dpSwitch: false}, true)
 }
 
 // SetColour switches the bulb to colour mode and sets the given RGB
@@ -64,7 +64,7 @@ func (b *Bulb) SetColour(ctx context.Context, r, g, bl uint8) error {
 	return b.client.control(ctx, map[string]any{
 		dpMode:   modeColour,
 		dpColour: rgbToHSV16Hex(r, g, bl),
-	})
+	}, true)
 }
 
 // SetBrightnessPercent sets brightness as a 0-100 percentage. Mirrors
@@ -99,7 +99,7 @@ func (b *Bulb) SetBrightnessPercent(ctx context.Context, pct int) error {
 				if h, s, _, err := parseHSV16Hex(hex); err == nil {
 					return b.client.control(ctx, map[string]any{
 						dpColour: hsv16Hex(h, s, value),
-					})
+					}, true)
 				}
 			}
 		}
@@ -108,5 +108,5 @@ func (b *Bulb) SetBrightnessPercent(ctx context.Context, pct int) error {
 	return b.client.control(ctx, map[string]any{
 		dpMode:       modeWhite,
 		dpBrightness: value,
-	})
+	}, true)
 }
