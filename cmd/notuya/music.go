@@ -28,7 +28,7 @@ import (
 // the reader or the other bulbs.
 // It reports whether every device streamed successfully, so a failing bulb
 // is visible to a caller that only checks the exit status.
-func runMusic(devices []config.Device, lastColorPath string) bool {
+func runMusic(devices []config.Device, lastColorPath string, opts device.StreamOptions) bool {
 	// SIGINT is the normal way a drag ends (the caller usually pipes a
 	// long-running picker into us), so treat it as a clean stop rather
 	// than letting it kill the process mid-stream and leave the bulb
@@ -59,11 +59,11 @@ func runMusic(devices []config.Device, lastColorPath string) bool {
 		targets = append(targets, target{name: name, colours: colours})
 
 		wg.Add(1)
-		go func(d config.Device, name string, colours <-chan device.RGB) {
+		go func(d config.Device, name string, colours <-chan device.RGB, opts device.StreamOptions) {
 			defer wg.Done()
 			// Drain on failure so a dead device cannot leave the
 			// broadcast loop blocked on a full channel.
-			if err := streamDevice(ctx, d, name, colours); err != nil {
+			if err := streamDevice(ctx, d, name, colours, opts); err != nil {
 				fmt.Fprintf(os.Stderr, "FAIL: %s -> %v\n", name, err)
 				mu.Lock()
 				failed = true
@@ -71,7 +71,7 @@ func runMusic(devices []config.Device, lastColorPath string) bool {
 				for range colours {
 				}
 			}
-		}(d, name, colours)
+		}(d, name, colours, opts)
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -134,7 +134,7 @@ func offer(ch chan device.RGB, c device.RGB) {
 
 // streamDevice opens one session and streams colours to it for the whole
 // run, then leaves the bulb on the last colour it received.
-func streamDevice(ctx context.Context, d config.Device, name string, colours <-chan device.RGB) error {
+func streamDevice(ctx context.Context, d config.Device, name string, colours <-chan device.RGB, opts device.StreamOptions) error {
 	sess := protocol35.NewSession(d.IPAddress, []byte(d.LocalKey))
 
 	openCtx, cancel := context.WithTimeout(ctx, commandTimeout)
@@ -162,7 +162,7 @@ func streamDevice(ctx context.Context, d config.Device, name string, colours <-c
 		}
 	}()
 
-	streamErr := bulb.StreamColours(ctx, tapped, device.StreamOptions{})
+	streamErr := bulb.StreamColours(ctx, tapped, opts)
 
 	// Drain whatever is still queued: on an early stream error nothing
 	// else would consume tapped, and its goroutine would leak blocked on

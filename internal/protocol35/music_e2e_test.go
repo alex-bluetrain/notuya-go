@@ -32,7 +32,7 @@ func TestStreamColoursEndToEnd(t *testing.T) {
 	go func() {
 		done <- bulb.StreamColours(ctx, colours, device.StreamOptions{
 			Interval:   5 * time.Millisecond,
-			Transition: 1,
+			Transition: device.Transition(1),
 		})
 	}()
 

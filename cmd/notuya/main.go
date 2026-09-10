@@ -26,6 +26,7 @@ const usage = `Usage:
   notuya color RRGGBB
   notuya brightness 0-100
   notuya music            (streams RRGGBB colors read from stdin, one per line)
+                          [--transition 0-10] [--interval 40ms]
   notuya get-color
   notuya list
   notuya scan
@@ -37,6 +38,8 @@ const commandTimeout = 10 * time.Second
 
 func main() {
 	configPath := flag.String("config", "", "path to config.json (default: $NOTUYA_CONFIG, or the user config dir)")
+	transition := flag.Int("transition", device.DefaultTransition, "music: per-update fade length, 0-10 (higher is smoother but smears)")
+	interval := flag.Duration("interval", device.DefaultStreamInterval, "music: minimum spacing between colour updates")
 	flag.Parse()
 	args := flag.Args()
 
@@ -136,7 +139,12 @@ func main() {
 			return bulb.SetBrightnessPercent(ctx, pct)
 		})
 	case "music":
-		if !runMusic(cfg.Devices, lastColorPath) {
+		if *transition < 0 || *transition > device.MaxTransition {
+			fmt.Fprintf(os.Stderr, "transition: must be 0-%d, got %d\n", device.MaxTransition, *transition)
+			os.Exit(1)
+		}
+		opts := device.StreamOptions{Interval: *interval, Transition: transition}
+		if !runMusic(cfg.Devices, lastColorPath, opts) {
 			os.Exit(1)
 		}
 	default:

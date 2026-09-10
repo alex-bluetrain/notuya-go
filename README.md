@@ -63,10 +63,26 @@ a per-update transition time, so colours track the pointer.
 Updates are coalesced: if colours arrive faster than the bulb can accept
 them, the newest wins and the stale ones are dropped, rather than the bulb
 falling progressively further behind. A slow or unreachable device is
-reported on stderr without stalling the others.
+reported on stderr without stalling the others, and the exit status is
+non-zero if any of them failed.
 
 The stream ends when stdin closes or on Ctrl-C, and each bulb is left
 holding the last colour it received (also saved for `notuya get-color`).
+
+Two flags tune how a drag feels:
+
+```bash
+# Snappier but steppier; 0 removes the fade entirely.
+my-color-picker --follow | ./dist/notuya --transition 0 music
+
+# Smoother, at the cost of smearing fast movement.
+my-color-picker --follow | ./dist/notuya --transition 5 --interval 25ms music
+```
+
+`--transition` (0-10, default 1) is the per-update fade the bulb applies,
+and `--interval` (default 40ms, ~25fps) the minimum spacing between updates.
+Sending faster than the bulb keeps up with just means more dropped updates,
+not a faster drag.
 
 ### `notuya scan`
 

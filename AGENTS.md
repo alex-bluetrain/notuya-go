@@ -216,6 +216,11 @@ configured device over a persistent session — the equivalent of the Python
 project's `picker.py`. See the DP 28 section above for the wire format and
 the mode entry/exit rules.
 
+`--transition` (0-10) and `--interval` are exposed as flags for tuning drag
+feel by hand. `StreamOptions.Transition` is a `*int` rather than an `int`
+because 0 is a meaningful value (no fade), so it cannot double as "unset";
+use `device.Transition(n)` to build one.
+
 The flow, in `device.StreamColours`:
 
 1. Blocking `Status()` warm-up, while the connection is still exclusively

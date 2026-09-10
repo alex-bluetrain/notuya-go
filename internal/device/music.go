@@ -26,10 +26,10 @@ const (
 	// the Python picker settled on.
 	DefaultTransition = 1
 
-	// maxTransition is the highest value confirmed working on the target
+	// MaxTransition is the highest value confirmed working on the target
 	// hardware. It is also the largest that still encodes as one hex digit,
 	// which the payload format requires.
-	maxTransition = 10
+	MaxTransition = 10
 
 	// streamHeartbeatInterval bounds how long a stream stays silent. Tuya
 	// devices drop idle connections, and a drag naturally pauses whenever
@@ -47,8 +47,8 @@ const (
 // change how the device reads the payload and can leave it ignoring colour
 // updates altogether. Dim a streamed colour by scaling r/g/b instead.
 func musicColourHex(transition int, r, g, b uint8) (string, error) {
-	if transition < 0 || transition > maxTransition {
-		return "", fmt.Errorf("device: transition must be 0-%d, got %d", maxTransition, transition)
+	if transition < 0 || transition > MaxTransition {
+		return "", fmt.Errorf("device: transition must be 0-%d, got %d", MaxTransition, transition)
 	}
 	return fmt.Sprintf("%x%s%04x%04x", transition, rgbToHSV16Hex(r, g, b), 0, 0), nil
 }
@@ -65,16 +65,22 @@ type StreamOptions struct {
 	// faster are coalesced, newest wins.
 	Interval time.Duration
 
-	// Transition is the per-update fade length (0-10) sent on DP 28.
-	Transition int
+	// Transition is the per-update fade length (0-10) sent on DP 28. Zero
+	// is a meaningful setting (instant, visibly steppy) rather than
+	// "unset", so leave it nil to take the default.
+	Transition *int
 }
+
+// Transition returns a pointer suitable for StreamOptions.Transition.
+func Transition(n int) *int { return &n }
 
 func (o StreamOptions) withDefaults() StreamOptions {
 	if o.Interval <= 0 {
 		o.Interval = DefaultStreamInterval
 	}
-	if o.Transition == 0 {
-		o.Transition = DefaultTransition
+	if o.Transition == nil {
+		d := DefaultTransition
+		o.Transition = &d
 	}
 	return o
 }
@@ -129,7 +135,7 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan RGB, opts Strea
 	}()
 
 	send := func(c RGB) error {
-		hex, err := musicColourHex(opts.Transition, c.R, c.G, c.B)
+		hex, err := musicColourHex(*opts.Transition, c.R, c.G, c.B)
 		if err != nil {
 			return err
 		}

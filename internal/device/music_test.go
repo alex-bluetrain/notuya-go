@@ -129,6 +129,38 @@ func TestMusicColourHexRejectsBadTransition(t *testing.T) {
 	}
 }
 
+// TestStreamColoursHonoursZeroTransition guards the reason Transition is a
+// pointer: zero is a meaningful setting (instant, no fade), so it must reach
+// the wire instead of being read as "unset" and replaced by the default.
+func TestStreamColoursHonoursZeroTransition(t *testing.T) {
+	mock := newMockStreamSession()
+	bulb := NewBulb(mock, "test")
+
+	colours := make(chan RGB, 1)
+	colours <- RGB{R: 255}
+	close(colours)
+
+	err := bulb.StreamColours(context.Background(), colours, StreamOptions{
+		Interval:   time.Millisecond,
+		Transition: Transition(0),
+	})
+	if err != nil {
+		t.Fatalf("StreamColours: %v", err)
+	}
+
+	calls := mock.recorded()
+	last := calls[len(calls)-1]
+	dps := musicDPSFromPayload(t, last.payload)
+	got := dps[dpMusic]
+	want, err := musicColourHex(0, 255, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("DP %s = %q, want %q (transition 0 must survive)", dpMusic, got, want)
+	}
+}
+
 // TestStreamColoursPayloadShape checks the on-the-wire shape of a stream:
 // a blocking warm-up query first, then DP 28 writes that must not wait.
 func TestStreamColoursPayloadShape(t *testing.T) {
@@ -141,7 +173,7 @@ func TestStreamColoursPayloadShape(t *testing.T) {
 
 	err := bulb.StreamColours(context.Background(), colours, StreamOptions{
 		Interval:   time.Millisecond,
-		Transition: 1,
+		Transition: Transition(1),
 	})
 	if err != nil {
 		t.Fatalf("StreamColours: %v", err)
@@ -204,7 +236,7 @@ func TestStreamColoursCoalesces(t *testing.T) {
 	go func() {
 		done <- bulb.StreamColours(context.Background(), colours, StreamOptions{
 			Interval:   50 * time.Millisecond,
-			Transition: 1,
+			Transition: Transition(1),
 		})
 	}()
 
