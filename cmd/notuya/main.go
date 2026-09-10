@@ -136,7 +136,9 @@ func main() {
 			return bulb.SetBrightnessPercent(ctx, pct)
 		})
 	case "music":
-		runMusic(cfg.Devices, lastColorPath)
+		if !runMusic(cfg.Devices, lastColorPath) {
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(1)

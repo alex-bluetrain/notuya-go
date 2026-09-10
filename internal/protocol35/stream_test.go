@@ -22,6 +22,35 @@ func openTestSession(t *testing.T, d *fakeDevice) *Session {
 	return sess
 }
 
+// TestOpenDeadlineDoesNotOutliveHandshake pins the fix for a bug found
+// against real hardware: Open set a deadline on the connection for the dial
+// and handshake, but nothing cleared it afterwards. A session outlives the
+// short context that opened it, so once that deadline passed every later
+// send failed with "i/o timeout" — silently, because streaming sends are
+// fire-and-forget. A drag simply stopped affecting the bulb.
+func TestOpenDeadlineDoesNotOutliveHandshake(t *testing.T) {
+	d := newFakeDevice(t, testLocalKey)
+
+	sess := NewSession(d.addr(), testLocalKey)
+	openCtx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if err := sess.Open(openCtx); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+
+	// Outlive the open context, as any real session does.
+	<-openCtx.Done()
+
+	// A deadline-free context must not inherit the expired one.
+	if _, err := sess.Command(context.Background(), protocol.HeartBeat, nil, false); err != nil {
+		t.Fatalf("send after the open context expired: %v", err)
+	}
+	if frames := d.waitForFrames(1, 2*time.Second); frames[0].Cmd != protocol.HeartBeat {
+		t.Errorf("device received cmd 0x%02x, want heartbeat 0x%02x", frames[0].Cmd, protocol.HeartBeat)
+	}
+}
+
 // TestCommandNoWaitReturnsWithoutResponse checks the fire-and-forget path
 // against a device that deliberately never acks: with wait=true this would
 // block until the deadline.

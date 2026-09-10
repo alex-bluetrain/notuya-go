@@ -26,7 +26,9 @@ import (
 // Unlike forEachDevice, the streams share one stdin, so colours are
 // broadcast to per-device channels: a slow or dead device must not stall
 // the reader or the other bulbs.
-func runMusic(devices []config.Device, lastColorPath string) {
+// It reports whether every device streamed successfully, so a failing bulb
+// is visible to a caller that only checks the exit status.
+func runMusic(devices []config.Device, lastColorPath string) bool {
 	// SIGINT is the normal way a drag ends (the caller usually pipes a
 	// long-running picker into us), so treat it as a clean stop rather
 	// than letting it kill the process mid-stream and leave the bulb
@@ -40,7 +42,11 @@ func runMusic(devices []config.Device, lastColorPath string) {
 	}
 
 	targets := make([]target, 0, len(devices))
-	var wg sync.WaitGroup
+	var (
+		wg     sync.WaitGroup
+		mu     sync.Mutex
+		failed bool
+	)
 
 	for _, d := range devices {
 		name := d.Name
@@ -59,6 +65,9 @@ func runMusic(devices []config.Device, lastColorPath string) {
 			// broadcast loop blocked on a full channel.
 			if err := streamDevice(ctx, d, name, colours); err != nil {
 				fmt.Fprintf(os.Stderr, "FAIL: %s -> %v\n", name, err)
+				mu.Lock()
+				failed = true
+				mu.Unlock()
 				for range colours {
 				}
 			}
@@ -95,12 +104,15 @@ func runMusic(devices []config.Device, lastColorPath string) {
 	wg.Wait()
 
 	// Only persist once the streams have settled the bulbs on this colour,
-	// so `notuya get-color` agrees with what is actually lit.
-	if lastColor != "" {
+	// so `notuya get-color` agrees with what is actually lit. A failed
+	// stream means the bulbs never reached it, so recording it would make
+	// the cache lie.
+	if lastColor != "" && !failed {
 		if err := config.WriteLastColor(lastColorPath, lastColor); err != nil {
 			fmt.Fprintln(os.Stderr, "warning: could not save last color:", err)
 		}
 	}
+	return !failed
 }
 
 // offer delivers c to ch, discarding an undelivered older colour if one is

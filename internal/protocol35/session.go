@@ -75,6 +75,10 @@ func (s *Session) Open(ctx context.Context) error {
 		s.conn = nil
 		return err
 	}
+	// The dial/handshake deadline must not outlive the handshake: a
+	// session can be held open far longer than the context that opened it,
+	// and a leftover deadline would expire under a live stream.
+	_ = conn.SetDeadline(time.Time{})
 	return nil
 }
 
@@ -140,11 +144,14 @@ func (s *Session) Command(ctx context.Context, cmd uint32, payload []byte, wait 
 	if s.conn == nil || s.sessionKey == nil {
 		return nil, fmt.Errorf("protocol35: session is not open")
 	}
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = s.conn.SetWriteDeadline(deadline)
-		if wait {
-			_ = s.conn.SetReadDeadline(deadline)
-		}
+	// Always write the deadline this call implies, clearing it when ctx has
+	// none. Leaving a previous call's deadline in place would otherwise
+	// expire mid-session: Open's own deadline used to outlive the handshake
+	// and kill every send on a long-lived streaming session.
+	deadline, _ := ctx.Deadline()
+	_ = s.conn.SetWriteDeadline(deadline)
+	if wait {
+		_ = s.conn.SetReadDeadline(deadline)
 	}
 
 	iv, err := randomIV()
