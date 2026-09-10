@@ -1,3 +1,5 @@
+![notuya — no son tuyas, son mías: bulbs driven locally instead of through the Tuya cloud](notuya.png)
+
 # notuya-go
 
 A dependency-free Go reimplementation of the Tuya local protocol v3.5 — the
