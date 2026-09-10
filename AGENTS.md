@@ -184,6 +184,12 @@ with the Python project's `config.json`.
 - Every CLI operation is open → handshake → command(s) → close (non-persistent connections). `music` is the exception: one session per device for the whole run.
 - Concurrent fan-out to all devices with `sync.WaitGroup`, per-device error isolation.
 - `Session` deadlines are set per direction (`SetReadDeadline`/`SetWriteDeadline`, never `SetDeadline`): during a stream a `wait=false` write must not disturb the read deadline owned by the concurrent `DrainInbound`.
+- A deadline must never outlive the operation it bounds. A session lives far
+  longer than the short context that opened it, so `Open` clears the
+  dial/handshake deadline before returning, and every `Command` sets the
+  deadline its own context implies instead of inheriting whatever the last
+  call left on the socket. Getting this wrong killed streams ~10s in, and
+  silently: fire-and-forget sends never look at the error.
 - Warm-up with `Status()` (a throwaway query) before the real command — mirrors `ctl.py`'s pattern.
 - Color conversion: an exact port of Python's `colorsys.rgb_to_hsv`, with truncation (not rounding) for bit-for-bit parity with tinytuya.
 
@@ -203,7 +209,7 @@ NOTUYA_INTEGRATION=1 \
 - `device/client_test.go`: CONTROL_NEW/DP_QUERY_NEW payload construction against a mock session.
 - `device/colour_test.go`: RGB ↔ hsv16 hex round-trip.
 - `device/music_test.go`: DP 28 encoding, streaming payload shape, latest-wins coalescing, drain shutdown.
-- `discovery/discovery_test.go`: fixed discovery key validation.
+- `discovery/discovery_test.go`: fixed discovery key validation, plus the announcement parsing each scanner bug hid in — retcode-prefixed replies, bare announcements, our own request echoed back, duplicate broadcast targets.
 - `cmd/notuya/music_test.go`: the stdin broadcast never blocks and keeps the newest colour.
 - Integration tests gated behind `NOTUYA_INTEGRATION` so `go test ./...` is hermetic by default.
 
@@ -211,7 +217,8 @@ The streaming path is also covered **without hardware**:
 `protocol35/fakedevice_test.go` is an in-process device that speaks the real
 handshake over a real TCP socket. `protocol35/stream_test.go` uses it for the
 concurrency contract (fire-and-forget writes racing `DrainInbound`, session
-hand-back, dropped connection), and `protocol35/music_e2e_test.go` runs the
+hand-back, dropped connection, and a send outliving the context that opened
+the session), and `protocol35/music_e2e_test.go` runs the
 actual `device.StreamColours` loop against it end-to-end. These live in
 `protocol35` rather than `device` because the fixture belongs there and
 `device` does not import `protocol35`.
