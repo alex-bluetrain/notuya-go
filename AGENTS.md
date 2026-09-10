@@ -10,18 +10,18 @@ for a Python runtime.
 ```
 cmd/notuya/main.go          CLI: on, off, color, brightness, get-color, list, scan
 cmd/notuya/music.go         CLI: music (stdin colour streaming)
+cmd/notuya/config.go        CLI: config.json loading and last-color cache
 internal/
   protocol/                  Version-agnostic interface (Session)
   protocol35/                v3.5 implementation: 6699 framing, AES-GCM, session handshake
   device/                    Bulb API and DP encoding
   discovery/                 UDP scanner (ports 6667/7000)
-  config/                    config.json loading and last-color cache
 ```
 
 ### Dependency flow
 
 ```
-cmd/notuya → config, device, discovery, protocol35
+cmd/notuya → device, discovery, protocol35
 device     → protocol (the interface, never protocol35 directly)
 discovery  → protocol, protocol35 (uses EncodeFrame/DecodeFrame with the fixed discovery key)
 protocol35 → protocol (command constants)
@@ -30,6 +30,20 @@ protocol35 → protocol (command constants)
 `device` depends only on `protocol.Session`. Adding support for another
 version (3.1/3.3) means writing a new `protocol3x.Session` implementing the
 same interface — without touching `device` or the CLI.
+
+`internal/` is the library: it talks to bulbs and knows nothing else. No
+package under it prints, exits, reads the environment, or touches the
+filesystem — errors travel up and `cmd/notuya` decides what to show. That
+is what lets the whole streaming path be tested against an in-process fake
+device without going near the binary.
+
+Everything the *file layout* implies is CLI policy and lives in
+`cmd/notuya/config.go`: where `config.json` is (the `--config` >
+`NOTUYA_CONFIG` > user-config-dir precedence), which of its keys are read,
+and the `ffffff` fallback for an absent last-colour cache. It was a package
+under `internal/` originally, which put policy at the same level as the
+protocol and split it from `resolveConfigPath` in `main.go`; nothing else
+ever imported it.
 
 ### Core interface
 
@@ -205,7 +219,7 @@ NOTUYA_INTEGRATION=1 \
 
 - `protocol35/frame_test.go`: 6699 frame encode/decode round-trip, corruption rejection, retcode stripping.
 - `protocol35/handshake_test.go`: validation against a real capture fixture (`testdata/handshake/session1.json`).
-- `config/config_test.go`: config.json parsing and last-color round-trip.
+- `cmd/notuya/config_test.go`: config.json parsing and last-color round-trip.
 - `device/client_test.go`: CONTROL_NEW/DP_QUERY_NEW payload construction against a mock session.
 - `device/colour_test.go`: RGB ↔ hsv16 hex round-trip.
 - `device/music_test.go`: DP 28 encoding, streaming payload shape, latest-wins coalescing, drain shutdown.

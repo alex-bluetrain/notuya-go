@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/config"
 	"github.com/averstraeten/notuya-go/internal/device"
 	"github.com/averstraeten/notuya-go/internal/discovery"
 	"github.com/averstraeten/notuya-go/internal/protocol35"
@@ -57,7 +56,7 @@ func main() {
 	cmd := args[0]
 
 	if cmd == "get-color" {
-		fmt.Println(config.ReadLastColor(lastColorPath))
+		fmt.Println(readLastColor(lastColorPath))
 		return
 	}
 
@@ -75,7 +74,7 @@ func main() {
 		return
 	}
 
-	cfg, err := config.Load(path)
+	cfg, err := loadConfig(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -122,7 +121,7 @@ func main() {
 			}
 			return bulb.SetColour(ctx, r, g, b)
 		})
-		if err := config.WriteLastColor(lastColorPath, fmt.Sprintf("%02x%02x%02x", r, g, b)); err != nil {
+		if err := writeLastColor(lastColorPath, fmt.Sprintf("%02x%02x%02x", r, g, b)); err != nil {
 			fmt.Fprintln(os.Stderr, "warning: could not save last color:", err)
 		}
 	case "brightness":
@@ -203,13 +202,13 @@ func parseColor(raw string) (r, g, b uint8, err error) {
 // failures per device (one device failing does not stop the others) —
 // mirrors ctl.py's ThreadPoolExecutor-based for_each_device, including
 // its "status() as a connectivity warm-up before the real command" step.
-func forEachDevice(devices []config.Device, fn func(ctx context.Context, b *device.Bulb) error) {
+func forEachDevice(devices []Device, fn func(ctx context.Context, b *device.Bulb) error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
 	for _, d := range devices {
 		wg.Add(1)
-		go func(d config.Device) {
+		go func(d Device) {
 			defer wg.Done()
 			name := d.Name
 			if name == "" {

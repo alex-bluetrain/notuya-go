@@ -9,7 +9,6 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/averstraeten/notuya-go/internal/config"
 	"github.com/averstraeten/notuya-go/internal/device"
 	"github.com/averstraeten/notuya-go/internal/protocol35"
 )
@@ -28,7 +27,7 @@ import (
 // the reader or the other bulbs.
 // It reports whether every device streamed successfully, so a failing bulb
 // is visible to a caller that only checks the exit status.
-func runMusic(devices []config.Device, lastColorPath string, opts device.StreamOptions) bool {
+func runMusic(devices []Device, lastColorPath string, opts device.StreamOptions) bool {
 	// SIGINT is the normal way a drag ends (the caller usually pipes a
 	// long-running picker into us), so treat it as a clean stop rather
 	// than letting it kill the process mid-stream and leave the bulb
@@ -59,7 +58,7 @@ func runMusic(devices []config.Device, lastColorPath string, opts device.StreamO
 		targets = append(targets, target{name: name, colours: colours})
 
 		wg.Add(1)
-		go func(d config.Device, name string, colours <-chan device.RGB, opts device.StreamOptions) {
+		go func(d Device, name string, colours <-chan device.RGB, opts device.StreamOptions) {
 			defer wg.Done()
 			// Drain on failure so a dead device cannot leave the
 			// broadcast loop blocked on a full channel.
@@ -108,7 +107,7 @@ func runMusic(devices []config.Device, lastColorPath string, opts device.StreamO
 	// stream means the bulbs never reached it, so recording it would make
 	// the cache lie.
 	if lastColor != "" && !failed {
-		if err := config.WriteLastColor(lastColorPath, lastColor); err != nil {
+		if err := writeLastColor(lastColorPath, lastColor); err != nil {
 			fmt.Fprintln(os.Stderr, "warning: could not save last color:", err)
 		}
 	}
@@ -134,7 +133,7 @@ func offer(ch chan device.RGB, c device.RGB) {
 
 // streamDevice opens one session and streams colours to it for the whole
 // run, then leaves the bulb on the last colour it received.
-func streamDevice(ctx context.Context, d config.Device, name string, colours <-chan device.RGB, opts device.StreamOptions) error {
+func streamDevice(ctx context.Context, d Device, name string, colours <-chan device.RGB, opts device.StreamOptions) error {
 	sess := protocol35.NewSession(d.IPAddress, []byte(d.LocalKey))
 
 	openCtx, cancel := context.WithTimeout(ctx, commandTimeout)

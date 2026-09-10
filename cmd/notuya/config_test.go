@@ -1,4 +1,4 @@
-package config
+package main
 
 import (
 	"os"
@@ -8,9 +8,9 @@ import (
 
 func TestLoadValid(t *testing.T) {
 	path := filepath.Join("..", "..", "testdata", "config", "valid.json")
-	cfg, err := Load(path)
+	cfg, err := loadConfig(path)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("loadConfig: %v", err)
 	}
 	if len(cfg.Devices) != 2 {
 		t.Fatalf("got %d devices, want 2", len(cfg.Devices))
@@ -32,7 +32,7 @@ func TestLoadValid(t *testing.T) {
 }
 
 func TestLoadMissingFile(t *testing.T) {
-	_, err := Load("/nonexistent/path/config.json")
+	_, err := loadConfig("/nonexistent/path/config.json")
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
@@ -44,7 +44,7 @@ func TestLoadMalformedJSON(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{not json`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(path)
+	_, err := loadConfig(path)
 	if err == nil {
 		t.Error("expected error for malformed JSON")
 	}
@@ -61,9 +61,9 @@ func TestLoadIgnoresExtraKeys(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := loadConfig(path)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("loadConfig: %v", err)
 	}
 	if len(cfg.Devices) != 1 {
 		t.Fatalf("got %d devices, want 1", len(cfg.Devices))
@@ -77,18 +77,18 @@ func TestLastColorRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "last-color.txt")
 
-	if err := WriteLastColor(path, "ff8800"); err != nil {
+	if err := writeLastColor(path, "ff8800"); err != nil {
 		t.Fatalf("WriteLastColor: %v", err)
 	}
-	got := ReadLastColor(path)
+	got := readLastColor(path)
 	if got != "ff8800" {
 		t.Errorf("ReadLastColor = %q, want %q", got, "ff8800")
 	}
 }
 
 func TestLastColorDefaultOnMissing(t *testing.T) {
-	got := ReadLastColor("/nonexistent/last-color.txt")
+	got := readLastColor("/nonexistent/last-color.txt")
 	if got != "ffffff" {
-		t.Errorf("ReadLastColor(missing) = %q, want %q", got, "ffffff")
+		t.Errorf("readLastColor(missing) = %q, want %q", got, "ffffff")
 	}
 }
