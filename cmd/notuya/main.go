@@ -1,10 +1,22 @@
-// Command notuya is the CLI for controlling Tuya local-protocol v3.5 bulbs.
-// Scaffolding only for now — real command dispatch lands in milestone M4.
+// Command notuya is the CLI for controlling Tuya local-protocol v3.5
+// bulbs — the Go equivalent of the sibling Python project's ctl.py.
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/averstraeten/notuya-go/internal/config"
+	"github.com/averstraeten/notuya-go/internal/device"
+	"github.com/averstraeten/notuya-go/internal/protocol35"
 )
 
 const usage = `Usage:
@@ -14,14 +26,193 @@ const usage = `Usage:
   notuya brightness 0-100
   notuya get-color
   notuya list
-  notuya scan
 `
 
+const commandTimeout = 10 * time.Second
+
 func main() {
-	if len(os.Args) < 2 {
+	configPath := flag.String("config", "", "path to config.json (default: $NOTUYA_CONFIG, or the user config dir)")
+	flag.Parse()
+	args := flag.Args()
+
+	if len(args) < 1 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr, "notuya: not implemented yet")
-	os.Exit(1)
+
+	path := resolveConfigPath(*configPath)
+	lastColorPath := filepath.Join(filepath.Dir(path), "last-color.txt")
+
+	cmd := args[0]
+
+	if cmd == "get-color" {
+		fmt.Println(config.ReadLastColor(lastColorPath))
+		return
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	if cmd == "list" {
+		for _, d := range cfg.Devices {
+			name := d.Name
+			if name == "" {
+				name = d.DeviceID
+			}
+			fmt.Printf("%s\t%s\n", name, d.IPAddress)
+		}
+		return
+	}
+
+	if len(cfg.Devices) == 0 {
+		fmt.Fprintln(os.Stderr, "no devices configured in", path)
+		os.Exit(1)
+	}
+
+	switch cmd {
+	case "on":
+		forEachDevice(cfg.Devices, func(ctx context.Context, b *device.Bulb) error {
+			return b.TurnOn(ctx)
+		})
+	case "off":
+		forEachDevice(cfg.Devices, func(ctx context.Context, b *device.Bulb) error {
+			return b.TurnOff(ctx)
+		})
+	case "color":
+		if len(args) != 2 {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(1)
+		}
+		r, g, b, err := parseColor(args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		forEachDevice(cfg.Devices, func(ctx context.Context, bulb *device.Bulb) error {
+			if err := bulb.TurnOn(ctx); err != nil {
+				return err
+			}
+			return bulb.SetColour(ctx, r, g, b)
+		})
+		if err := config.WriteLastColor(lastColorPath, fmt.Sprintf("%02x%02x%02x", r, g, b)); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: could not save last color:", err)
+		}
+	case "brightness":
+		if len(args) != 2 {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(1)
+		}
+		pct, err := strconv.Atoi(args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "brightness: invalid value:", args[1])
+			os.Exit(1)
+		}
+		forEachDevice(cfg.Devices, func(ctx context.Context, bulb *device.Bulb) error {
+			if err := bulb.TurnOn(ctx); err != nil {
+				return err
+			}
+			return bulb.SetBrightnessPercent(ctx, pct)
+		})
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(1)
+	}
+}
+
+// resolveConfigPath applies the precedence: --config flag > NOTUYA_CONFIG
+// env > the user's config directory.
+func resolveConfigPath(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if env := os.Getenv("NOTUYA_CONFIG"); env != "" {
+		return env
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = "."
+	}
+	return filepath.Join(dir, "notuya-go", "config.json")
+}
+
+var colorRGBAPattern = regexp.MustCompile(`(?i)^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)`)
+
+// parseColor accepts #RRGGBB, RRGGBB, rgb(r,g,b) or rgba(r,g,b,a) — the
+// same formats ctl.py's parse_color accepts (zenity's colour-picker output
+// formats).
+func parseColor(raw string) (r, g, b uint8, err error) {
+	raw = strings.TrimSpace(raw)
+	if m := colorRGBAPattern.FindStringSubmatch(raw); m != nil {
+		rv, _ := strconv.Atoi(m[1])
+		gv, _ := strconv.Atoi(m[2])
+		bv, _ := strconv.Atoi(m[3])
+		return uint8(rv), uint8(gv), uint8(bv), nil
+	}
+	hexColor := strings.TrimPrefix(raw, "#")
+	if len(hexColor) < 6 {
+		return 0, 0, 0, fmt.Errorf("color: invalid format: %q", raw)
+	}
+	hexColor = hexColor[:6]
+	rv, err1 := strconv.ParseUint(hexColor[0:2], 16, 8)
+	gv, err2 := strconv.ParseUint(hexColor[2:4], 16, 8)
+	bv, err3 := strconv.ParseUint(hexColor[4:6], 16, 8)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return 0, 0, 0, fmt.Errorf("color: invalid format: %q", raw)
+	}
+	return uint8(rv), uint8(gv), uint8(bv), nil
+}
+
+// forEachDevice fans out fn to every device concurrently, isolating
+// failures per device (one device failing does not stop the others) —
+// mirrors ctl.py's ThreadPoolExecutor-based for_each_device, including
+// its "status() as a connectivity warm-up before the real command" step.
+func forEachDevice(devices []config.Device, fn func(ctx context.Context, b *device.Bulb) error) {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, d := range devices {
+		wg.Add(1)
+		go func(d config.Device) {
+			defer wg.Done()
+			name := d.Name
+			if name == "" {
+				name = d.DeviceID
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+			defer cancel()
+
+			sess := protocol35.NewSession(d.IPAddress, []byte(d.LocalKey))
+			if err := sess.Open(ctx); err != nil {
+				report(&mu, false, name, err)
+				return
+			}
+			defer sess.Close()
+
+			bulb := device.NewBulb(sess, name)
+			if err := bulb.Status(ctx); err != nil {
+				report(&mu, false, name, err)
+				return
+			}
+			if err := fn(ctx, bulb); err != nil {
+				report(&mu, false, name, err)
+				return
+			}
+			report(&mu, true, name, nil)
+		}(d)
+	}
+	wg.Wait()
+}
+
+func report(mu *sync.Mutex, ok bool, name string, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+	if ok {
+		fmt.Printf("OK: %s\n", name)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "FAIL: %s -> %v\n", name, err)
 }
