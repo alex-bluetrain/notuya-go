@@ -36,7 +36,9 @@ const usage = `Usage:
 // seconds before any of them answer.
 const scanTimeout = 15 * time.Second
 
-const commandTimeout = 10 * time.Second
+// commandTimeout bounds one device's whole open→command→close cycle. It is
+// a variable so tests can shorten it; nothing at runtime reassigns it.
+var commandTimeout = 10 * time.Second
 
 func main() {
 	configPath := flag.String("config", "", "path to config.json (default: $NOTUYA_CONFIG, or the user config dir)")
@@ -96,13 +98,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Every device-touching command reports per-device outcomes and exits
+	// non-zero if any of them failed, so a caller can tell a partial
+	// failure from a clean run.
+	ok := true
+
 	switch cmd {
 	case "on":
-		forEachDevice(cfg.Devices, func(ctx context.Context, b *device.Bulb) error {
+		ok = forEachDevice(cfg.Devices, func(ctx context.Context, b *device.Bulb) error {
 			return b.TurnOn(ctx)
 		})
 	case "off":
-		forEachDevice(cfg.Devices, func(ctx context.Context, b *device.Bulb) error {
+		ok = forEachDevice(cfg.Devices, func(ctx context.Context, b *device.Bulb) error {
 			return b.TurnOff(ctx)
 		})
 	case "color":
@@ -115,7 +122,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		forEachDevice(cfg.Devices, func(ctx context.Context, bulb *device.Bulb) error {
+		ok = forEachDevice(cfg.Devices, func(ctx context.Context, bulb *device.Bulb) error {
 			if err := bulb.TurnOn(ctx); err != nil {
 				return err
 			}
@@ -134,7 +141,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "brightness: invalid value:", args[1])
 			os.Exit(1)
 		}
-		forEachDevice(cfg.Devices, func(ctx context.Context, bulb *device.Bulb) error {
+		ok = forEachDevice(cfg.Devices, func(ctx context.Context, bulb *device.Bulb) error {
 			if err := bulb.TurnOn(ctx); err != nil {
 				return err
 			}
@@ -146,11 +153,13 @@ func main() {
 			os.Exit(1)
 		}
 		opts := device.StreamOptions{Interval: *interval, Transition: transition}
-		if !runMusic(cfg.Devices, lastColorPath, opts) {
-			os.Exit(1)
-		}
+		ok = runMusic(cfg.Devices, lastColorPath, opts)
 	default:
 		fmt.Fprint(os.Stderr, usage)
+		os.Exit(1)
+	}
+
+	if !ok {
 		os.Exit(1)
 	}
 }
@@ -202,9 +211,22 @@ func parseColor(raw string) (r, g, b uint8, err error) {
 // failures per device (one device failing does not stop the others) —
 // mirrors ctl.py's ThreadPoolExecutor-based for_each_device, including
 // its "status() as a connectivity warm-up before the real command" step.
-func forEachDevice(devices []Device, fn func(ctx context.Context, b *device.Bulb) error) {
+// forEachDevice reports whether every device succeeded.
+func forEachDevice(devices []Device, fn func(ctx context.Context, b *device.Bulb) error) bool {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	failed := 0
+
+	report := func(name string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err == nil {
+			fmt.Printf("OK: %s\n", name)
+			return
+		}
+		failed++
+		fmt.Fprintf(os.Stderr, "FAIL: %s -> %v\n", name, err)
+	}
 
 	for _, d := range devices {
 		wg.Add(1)
@@ -220,32 +242,20 @@ func forEachDevice(devices []Device, fn func(ctx context.Context, b *device.Bulb
 
 			sess := protocol35.NewSession(d.IPAddress, []byte(d.LocalKey))
 			if err := sess.Open(ctx); err != nil {
-				report(&mu, false, name, err)
+				report(name, err)
 				return
 			}
 			defer sess.Close()
 
 			bulb := device.NewBulb(sess, name)
 			if err := bulb.Status(ctx); err != nil {
-				report(&mu, false, name, err)
+				report(name, err)
 				return
 			}
-			if err := fn(ctx, bulb); err != nil {
-				report(&mu, false, name, err)
-				return
-			}
-			report(&mu, true, name, nil)
+			report(name, fn(ctx, bulb))
 		}(d)
 	}
 	wg.Wait()
-}
 
-func report(mu *sync.Mutex, ok bool, name string, err error) {
-	mu.Lock()
-	defer mu.Unlock()
-	if ok {
-		fmt.Printf("OK: %s\n", name)
-		return
-	}
-	fmt.Fprintf(os.Stderr, "FAIL: %s -> %v\n", name, err)
+	return failed == 0
 }
