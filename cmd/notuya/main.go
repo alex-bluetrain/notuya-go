@@ -25,6 +25,7 @@ const usage = `Usage:
   notuya off
   notuya color RRGGBB
   notuya brightness 0-100
+  notuya music            (streams RRGGBB colors read from stdin, one per line)
   notuya get-color
   notuya list
   notuya scan
@@ -134,6 +135,8 @@ func main() {
 			}
 			return bulb.SetBrightnessPercent(ctx, pct)
 		})
+	case "music":
+		runMusic(cfg.Devices, lastColorPath)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(1)

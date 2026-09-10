@@ -23,8 +23,7 @@ bulb API → CLI → discovery scanner → Linux/Windows cross-compile.
   interface designed so that adding other versions (3.1/3.3/3.4) does not
   require touching the layers above it.
 - Basic control: `on`, `off`, `color`, `brightness`, `get-color`, `list`,
-  `scan`. "Music mode" (live drag, persistent socket) is left for a future
-  phase.
+  `scan`, plus `music` for live colour streaming over a persistent socket.
 - No external dependencies — only the Go stdlib (`crypto/aes`,
   `crypto/cipher`, `crypto/hmac`, `crypto/sha256`, `crypto/md5`).
 - Cross-platform: `make build-all` produces binaries for Linux and Windows
@@ -42,6 +41,32 @@ make build
 
 Expected configuration (see `internal/config`): the same format as the
 original Python project's `config.json`; only the `devices` array is read.
+
+### `notuya music`
+
+Streams colours read from stdin — one `RRGGBB` per line — to every
+configured device, keeping one session open for the whole run:
+
+```bash
+# Live drag from any tool that prints colours as it goes.
+my-color-picker --follow | ./dist/notuya music
+
+# Or a quick sweep.
+for i in $(seq 0 255); do printf '%02x00%02x\n' "$i" $((255-i)); sleep 0.02; done | ./dist/notuya music
+```
+
+`notuya color` is a one-shot command, and the bulb applies its own fade of
+roughly half a second to it, which makes dragging a colour picker feel
+laggy. `music` instead sends on the bulb's music-mode datapoint, which takes
+a per-update transition time, so colours track the pointer.
+
+Updates are coalesced: if colours arrive faster than the bulb can accept
+them, the newest wins and the stale ones are dropped, rather than the bulb
+falling progressively further behind. A slow or unreachable device is
+reported on stderr without stalling the others.
+
+The stream ends when stdin closes or on Ctrl-C, and each bulb is left
+holding the last colour it received (also saved for `notuya get-color`).
 
 ### `notuya scan`
 

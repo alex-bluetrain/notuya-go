@@ -62,6 +62,18 @@ func (c *client) query(ctx context.Context) (map[string]json.RawMessage, error) 
 // separate, unsolicited status push on the same connection), so the
 // response payload is intentionally not parsed.
 func (c *client) control(ctx context.Context, dps map[string]any) error {
+	return c.sendControl(ctx, dps, true)
+}
+
+// controlNoWait is control without waiting for a response: the write
+// returns as soon as the frame is on the wire. Used for colour streaming,
+// where the device stops acking after the first message of a run and a
+// blocking read would hang (see StreamColours).
+func (c *client) controlNoWait(ctx context.Context, dps map[string]any) error {
+	return c.sendControl(ctx, dps, false)
+}
+
+func (c *client) sendControl(ctx context.Context, dps map[string]any, wait bool) error {
 	body := map[string]any{
 		"protocol": 5,
 		"t":        time.Now().Unix(),
@@ -74,7 +86,7 @@ func (c *client) control(ctx context.Context, dps map[string]any) error {
 		return fmt.Errorf("device: encoding control payload: %w", err)
 	}
 	plaintext := append(versionHeader35(), encoded...)
-	if _, err := c.session.Command(ctx, protocol.ControlNew, plaintext, true); err != nil {
+	if _, err := c.session.Command(ctx, protocol.ControlNew, plaintext, wait); err != nil {
 		return fmt.Errorf("device: control command: %w", err)
 	}
 	return nil

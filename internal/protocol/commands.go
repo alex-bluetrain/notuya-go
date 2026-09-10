@@ -7,6 +7,7 @@ const (
 	SessKeyNegResp   uint32 = 0x04
 	SessKeyNegFinish uint32 = 0x05
 	Control          uint32 = 0x07
+	HeartBeat        uint32 = 0x09 // keeps an idle persistent connection alive
 	DPQuery          uint32 = 0x0a
 	ControlNew       uint32 = 0x0d
 	DPQueryNew       uint32 = 0x10

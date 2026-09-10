@@ -2,3 +2,6 @@
 config.json
 last-color.txt
 *.log
+
+# Local agent working files (plans, session state).
+.mastracode/

@@ -4,18 +4,35 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/averstraeten/notuya-go/internal/protocol"
 )
 
-var _ protocol.Session = (*Session)(nil)
+var (
+	_ protocol.Session       = (*Session)(nil)
+	_ protocol.StreamSession = (*Session)(nil)
+)
 
 // DefaultPort is the TCP port Tuya local-protocol devices listen on.
 const DefaultPort = 6668
+
+// drainReadSlice bounds how long a single DrainInbound read blocks, so
+// cancellation is noticed promptly on an idle connection. It is not a
+// timeout on the stream itself: a slice expiring with no bytes read is
+// normal and the loop simply continues.
+const drainReadSlice = 500 * time.Millisecond
+
+// maxFrameBody caps the body length accepted from a frame header. Device
+// frames are a few hundred bytes; a wildly larger value means the stream
+// desynchronised, and refusing it avoids a huge allocation driven by
+// network input.
+const maxFrameBody = 1 << 20
 
 // Session is a protocol.Session implementation for Tuya local protocol
 // v3.5: TCP transport, "6699" AES-GCM framing, and the 3-message
@@ -80,7 +97,7 @@ func (s *Session) negotiateSessionKey() error {
 		return fmt.Errorf("protocol35: sending handshake step1: %w", err)
 	}
 
-	resp, err := s.readFrame()
+	resp, err := s.readFrame(0)
 	if err != nil {
 		return fmt.Errorf("protocol35: reading handshake step2: %w", err)
 	}
@@ -113,15 +130,21 @@ func (s *Session) negotiateSessionKey() error {
 }
 
 // Command sends a framed request under the negotiated session key. If wait
-// is false it returns immediately after the write, with a nil payload —
-// reserved for a future persistent/fire-and-forget mode; Phase A (this
-// milestone) always calls with wait=true.
+// is false it returns immediately after the write, with a nil payload — the
+// fire-and-forget mode used for colour streaming (see device.StreamColours).
+//
+// Deadlines are set per direction rather than with SetDeadline: a wait=false
+// call must not disturb the read deadline owned by a concurrent
+// DrainInbound goroutine.
 func (s *Session) Command(ctx context.Context, cmd uint32, payload []byte, wait bool) ([]byte, error) {
 	if s.conn == nil || s.sessionKey == nil {
 		return nil, fmt.Errorf("protocol35: session is not open")
 	}
 	if deadline, ok := ctx.Deadline(); ok {
-		_ = s.conn.SetDeadline(deadline)
+		_ = s.conn.SetWriteDeadline(deadline)
+		if wait {
+			_ = s.conn.SetReadDeadline(deadline)
+		}
 	}
 
 	iv, err := randomIV()
@@ -140,7 +163,7 @@ func (s *Session) Command(ctx context.Context, cmd uint32, payload []byte, wait 
 		return nil, nil
 	}
 
-	respFrame, err := s.readFrame()
+	respFrame, err := s.readFrame(0)
 	if err != nil {
 		return nil, fmt.Errorf("protocol35: reading response to command %d: %w", cmd, err)
 	}
@@ -149,6 +172,38 @@ func (s *Session) Command(ctx context.Context, cmd uint32, payload []byte, wait 
 		return nil, err
 	}
 	return stripRetcode(df.Payload)
+}
+
+// DrainInbound reads and discards inbound frames until ctx is cancelled or
+// the connection fails. See protocol.StreamSession for the concurrency
+// contract: this owns the read side of the connection while it runs, so the
+// caller must only issue wait=false commands meanwhile.
+//
+// Frames are discarded without decrypting them: the point is to keep the
+// device's receive path moving, and a streaming caller has nothing to do
+// with unsolicited status frames.
+func (s *Session) DrainInbound(ctx context.Context) error {
+	if s.conn == nil || s.sessionKey == nil {
+		return fmt.Errorf("protocol35: session is not open")
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+		_ = s.conn.SetReadDeadline(time.Now().Add(drainReadSlice))
+		if _, err := s.readFrame(drainReadSlice); err != nil {
+			// An expired slice just means the device had nothing to
+			// say; anything else is a real connection failure.
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				continue
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("protocol35: draining inbound frames: %w", err)
+		}
+	}
 }
 
 // Close releases the underlying connection. Safe to call multiple times.
@@ -168,13 +223,25 @@ func (s *Session) writeFrame(frame []byte) error {
 
 // readFrame reads exactly one 6699 frame off the wire: the fixed-size
 // header first (to learn the body length), then body+suffix.
-func (s *Session) readFrame() ([]byte, error) {
+//
+// bodyTimeout, when non-zero, is applied as a fresh read deadline once the
+// header is in. Callers polling with a short deadline (DrainInbound) need
+// this: a deadline expiring between the header and the body would leave the
+// frame half-consumed and desynchronise the stream. Callers whose deadline
+// already covers the whole operation pass 0.
+func (s *Session) readFrame(bodyTimeout time.Duration) ([]byte, error) {
 	header := make([]byte, headerLen)
 	if _, err := io.ReadFull(s.conn, header); err != nil {
 		return nil, fmt.Errorf("reading frame header: %w", err)
 	}
+	if bodyTimeout > 0 {
+		_ = s.conn.SetReadDeadline(time.Now().Add(bodyTimeout))
+	}
 	// header layout: prefix(4) + unknown(2) + seqno(4) + cmd(4) + length(4).
 	length := binary.BigEndian.Uint32(header[14:18])
+	if length > maxFrameBody {
+		return nil, fmt.Errorf("%w: frame body length %d exceeds maximum %d", ErrBadFrame, length, maxFrameBody)
+	}
 	rest := make([]byte, length+4)
 	if _, err := io.ReadFull(s.conn, rest); err != nil {
 		return nil, fmt.Errorf("reading frame body (length=%d): %w", length, err)
