@@ -106,3 +106,21 @@ func stripRetcode(payload []byte) ([]byte, error) {
 	}
 	return payload[retcodeLen:], nil
 }
+
+// EncodeFrame builds a "6699" AES-GCM frame under key — the same wire
+// format used for the session handshake and post-handshake commands, but
+// exported here so internal/discovery can reuse it with Tuya's well-known
+// discovery key instead of a device's local_key/session_key.
+func EncodeFrame(key, iv []byte, seqno, cmd uint32, plaintext []byte) ([]byte, error) {
+	return encodeRequest(key, iv, seqno, cmd, plaintext)
+}
+
+// DecodeFrame parses, decrypts and authenticates a single "6699" frame
+// under key, returning its command code and decrypted payload.
+func DecodeFrame(key, frame []byte) (cmd uint32, payload []byte, err error) {
+	df, err := decodeFrame(key, frame)
+	if err != nil {
+		return 0, nil, err
+	}
+	return df.Cmd, df.Payload, nil
+}

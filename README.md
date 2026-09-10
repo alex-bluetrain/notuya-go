@@ -42,3 +42,16 @@ make build
 
 Expected configuration (see `internal/config`): the same format as the
 original Python project's `config.json`; only the `devices` array is read.
+
+### `notuya scan`
+
+Listens for Tuya discovery broadcasts (unsolicited UDP/6667, solicited
+UDP/7000) for 10s. On some networks (APs with client isolation, or that do
+not forward broadcast between segments) this finds nothing — that is a
+network limitation, not a protocol one: in this project's development
+environment, neither `notuya scan` nor `python -m tinytuya scan` (the
+official reference) find the devices via broadcast, even though direct
+control by IP (`on`/`off`/`color`/etc.) works fine against those same
+bulbs. If the same happens to you, use fixed `ip_address` values in
+`config.json` (or a MAC-based DHCP reservation on your router) instead of
+relying on the scanner.

@@ -16,6 +16,7 @@ import (
 
 	"github.com/averstraeten/notuya-go/internal/config"
 	"github.com/averstraeten/notuya-go/internal/device"
+	"github.com/averstraeten/notuya-go/internal/discovery"
 	"github.com/averstraeten/notuya-go/internal/protocol35"
 )
 
@@ -26,7 +27,10 @@ const usage = `Usage:
   notuya brightness 0-100
   notuya get-color
   notuya list
+  notuya scan
 `
+
+const scanTimeout = 10 * time.Second
 
 const commandTimeout = 10 * time.Second
 
@@ -47,6 +51,20 @@ func main() {
 
 	if cmd == "get-color" {
 		fmt.Println(config.ReadLastColor(lastColorPath))
+		return
+	}
+
+	if cmd == "scan" {
+		ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
+		defer cancel()
+		devices, err := discovery.Scan(ctx, scanTimeout)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		for _, d := range devices {
+			fmt.Printf("%s\t%s\t%s\n", d.ID, d.IP, d.Version)
+		}
 		return
 	}
 
