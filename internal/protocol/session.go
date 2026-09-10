@@ -1,0 +1,26 @@
+// Package protocol defines the version-agnostic transport contract that
+// higher layers (internal/device, internal/discovery) depend on. Concrete
+// protocol versions (internal/protocol35, and future internal/protocol3x
+// packages) implement Session without the rest of the codebase knowing
+// which version is in use.
+package protocol
+
+import "context"
+
+// Session is a single logical connection to one Tuya device, already past
+// whatever handshake its protocol version requires.
+type Session interface {
+	// Open performs any connection setup (TCP dial, session-key
+	// negotiation, etc.) needed before Command can be called.
+	Open(ctx context.Context) error
+
+	// Command sends a framed request and, if wait is true, blocks for and
+	// returns the decrypted response payload. wait=false sends and returns
+	// immediately with a nil payload — the hook a future persistent/
+	// fire-and-forget mode (e.g. "music mode") will use without needing any
+	// interface change.
+	Command(ctx context.Context, cmd uint32, payload []byte, wait bool) ([]byte, error)
+
+	// Close releases the underlying connection. Safe to call multiple times.
+	Close() error
+}
