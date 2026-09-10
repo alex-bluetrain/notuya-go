@@ -1,0 +1,13 @@
+{
+  "_comment": "Captured 2026-09-10 against real hardware (luz 1, id ebfake1111111111111111, 192.168.1.6, protocol 3.5) via a tshark capture of a tinytuya BulbDevice.status() call. local_nonce was fixed to a known value via a temporary, reverted, venv-only patch to tinytuya's XenonDevice.py (commenting out its os.urandom(16) call) so both sides of the handshake are reproducible and diffable. remote_nonce and session_key_hex were independently re-derived and cross-checked (a) against tinytuya's own DEBUG log line for this exact session and (b) against a from-scratch Python reference implementation using the `cryptography` package before this Go code was written. frame_dpquery_resp_plaintext is the real decrypted device response, confirming the derived session key actually authenticates and decrypts genuine hardware-generated traffic (its IV is device-generated, not the fixed local_nonce-derived one).",
+  "local_key": "fake-local-key16",
+  "local_nonce": "0123456789abcdef",
+  "remote_nonce": "73139b3b98be3e3a",
+  "session_key_hex": "00000000000000000000000000000000",
+  "frame_step1_hex": "00006699000000000001000000030000002c30313233343536373839616223edeec739304858e77f1a1f444753a89fd5bc4a74698ca6920e58597ac8ce5a00009966",
+  "frame_step2_hex": "0000669900000000994800000004000000504e664abedd408f489af7f20c97f94539b94e4db246f233679f3b6148cabbc3def731f1e02a49cce1fa47944c3e7b6a7c6b4525f78b84e7b569cd2b1373592dd450437347c850efbfd58695d74d8dbcd400009966",
+  "frame_step3_hex": "00006699000000000002000000050000003c303132333435363738396162f3b26fdbd93bc512632515bb0240e4ee27beb462c7ab90727638e9a06bbc4d757cd664021da0eba7c1b21f4bbb490c3c00009966",
+  "frame_dpquery_req_hex": "00006699000000000003000000100000001e303132333435363738396162ea627a353577d1eeacbe1d5adf09cb24b29b00009966",
+  "frame_dpquery_resp_hex": "0000669900000000994900000010000000b41c44cc0bc89bd3384229b4656f35f5f075be21854a138869b199aed302b1591b8fc6980c694ab15d4e071c55f5fea3876152c2dce9d92b09ab7036fc475f00c3af2e8497f92c38b32a2881731fab13afe19ac214ab862b40a36332d6577f3448598f60db63f809ed4b415ba5d5a4deefb22eee5dc115b056b9afa603ecd5d2c2b743cb4f4bc32fc1cb807fa66b50d892b9318b382a9ddcb44d26e2c2aedf78630992455fa6c94d073f02c113632c29076c95f08b00009966",
+  "frame_dpquery_resp_plaintext": "{\"dps\":{\"20\":true,\"21\":\"colour\",\"22\":560,\"23\":0,\"24\":\"000003e803e8\",\"25\":\"21323202015e01f403e800000000323202011303e803e800000000\",\"26\":0,\"34\":true}}"
+}
