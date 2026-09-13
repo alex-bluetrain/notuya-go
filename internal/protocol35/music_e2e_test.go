@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/averstraeten/notuya-go/internal/device"
+	"github.com/averstraeten/notuya-go/internal/device/bulb"
 	"github.com/averstraeten/notuya-go/internal/protocol"
 )
 
@@ -23,16 +24,16 @@ func TestStreamColoursEndToEnd(t *testing.T) {
 	d := newFakeDevice(t, testLocalKey)
 	sess := openTestSession(t, d)
 
-	bulb := device.NewBulb(sess, "e2e-test-bulb")
+	b := bulb.NewBulb(sess, "e2e-test-bulb")
 
 	colours := make(chan device.RGB)
 	done := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	go func() {
-		done <- bulb.StreamColours(ctx, colours, device.StreamOptions{
+		done <- b.StreamColours(ctx, colours, bulb.StreamOptions{
 			Interval:   5 * time.Millisecond,
-			Transition: device.Transition(1),
+			Transition: bulb.Transition(1),
 		})
 	}()
 

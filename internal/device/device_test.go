@@ -10,7 +10,7 @@ import (
 )
 
 // mockSession captures the arguments passed to Command so tests can inspect
-// the cmd and plaintext that client.control / client.query produce without
+// the cmd and plaintext that Device.SetDPs / Device.Status produce without
 // needing real hardware.
 type mockSession struct {
 	// Captured from the last Command call.
@@ -33,15 +33,15 @@ func (m *mockSession) Command(_ context.Context, cmd uint32, payload []byte, wai
 	return m.resp, m.err
 }
 
-// TestControlPayloadShape verifies that client.control sends cmd=CONTROL_NEW
+// TestSetDPsPayloadShape verifies that Device.SetDPs sends cmd=CONTROL_NEW
 // with the 15-byte version prefix followed by the expected JSON envelope.
-func TestControlPayloadShape(t *testing.T) {
+func TestSetDPsPayloadShape(t *testing.T) {
 	mock := &mockSession{}
-	c := newClient(mock)
+	d := NewDevice(mock, "test")
 
 	dps := map[string]any{"20": true, "21": "colour"}
-	if err := c.control(context.Background(), dps, true); err != nil {
-		t.Fatalf("control: %v", err)
+	if err := d.SetDPs(context.Background(), dps, true); err != nil {
+		t.Fatalf("SetDPs: %v", err)
 	}
 
 	if mock.lastCmd != protocol.ControlNew {
@@ -89,13 +89,13 @@ func TestControlPayloadShape(t *testing.T) {
 	}
 }
 
-// TestControlPayloadSingleDP ensures a single-DP control call also works.
-func TestControlPayloadSingleDP(t *testing.T) {
+// TestSetValueSingleDP ensures SetValue produces a single-DP control call.
+func TestSetValueSingleDP(t *testing.T) {
 	mock := &mockSession{}
-	c := newClient(mock)
+	d := NewDevice(mock, "test")
 
-	if err := c.control(context.Background(), map[string]any{"20": false}, true); err != nil {
-		t.Fatalf("control: %v", err)
+	if err := d.SetValue(context.Background(), "20", false, true); err != nil {
+		t.Fatalf("SetValue: %v", err)
 	}
 
 	jsonPart := mock.lastPayload[15:]
@@ -115,14 +115,27 @@ func TestControlPayloadSingleDP(t *testing.T) {
 	}
 }
 
-// TestQueryPayloadShape verifies that client.query sends cmd=DP_QUERY_NEW
-// with a bare "{}" payload and NO version prefix.
-func TestQueryPayloadShape(t *testing.T) {
-	mock := &mockSession{resp: []byte(`{"dps":{"20":true}}`)}
-	c := newClient(mock)
+// TestSetDPsFireAndForget verifies wait=false is forwarded to the session.
+func TestSetDPsFireAndForget(t *testing.T) {
+	mock := &mockSession{}
+	d := NewDevice(mock, "test")
 
-	if _, err := c.query(context.Background()); err != nil {
-		t.Fatalf("query: %v", err)
+	if err := d.SetValue(context.Background(), "20", true, false); err != nil {
+		t.Fatalf("SetValue: %v", err)
+	}
+	if mock.lastWait {
+		t.Error("wait = true, want false")
+	}
+}
+
+// TestStatusPayloadShape verifies that Device.Status sends cmd=DP_QUERY_NEW
+// with a bare "{}" payload and NO version prefix.
+func TestStatusPayloadShape(t *testing.T) {
+	mock := &mockSession{resp: []byte(`{"dps":{"20":true}}`)}
+	d := NewDevice(mock, "test")
+
+	if _, err := d.Status(context.Background()); err != nil {
+		t.Fatalf("Status: %v", err)
 	}
 
 	if mock.lastCmd != protocol.DPQueryNew {
@@ -138,17 +151,17 @@ func TestQueryPayloadShape(t *testing.T) {
 	}
 }
 
-// TestQueryParsesResponse verifies that client.query correctly parses a
+// TestStatusParsesResponse verifies that Device.Status correctly parses a
 // device's dps response into a map.
-func TestQueryParsesResponse(t *testing.T) {
+func TestStatusParsesResponse(t *testing.T) {
 	mock := &mockSession{
 		resp: []byte(`{"dps":{"20":true,"21":"colour","24":"016903e803e8"}}`),
 	}
-	c := newClient(mock)
+	d := NewDevice(mock, "test")
 
-	dps, err := c.query(context.Background())
+	dps, err := d.Status(context.Background())
 	if err != nil {
-		t.Fatalf("query: %v", err)
+		t.Fatalf("Status: %v", err)
 	}
 	if len(dps) != 3 {
 		t.Fatalf("got %d dps, want 3", len(dps))
@@ -164,20 +177,20 @@ func TestQueryParsesResponse(t *testing.T) {
 	}
 }
 
-// TestQueryEmptyResponse verifies that an empty response yields an empty map
-// (not nil, not an error).
-func TestQueryEmptyResponse(t *testing.T) {
+// TestStatusEmptyResponse verifies that an empty response yields an empty
+// map (not nil, not an error).
+func TestStatusEmptyResponse(t *testing.T) {
 	mock := &mockSession{resp: nil}
-	c := newClient(mock)
+	d := NewDevice(mock, "test")
 
-	dps, err := c.query(context.Background())
+	dps, err := d.Status(context.Background())
 	if err != nil {
-		t.Fatalf("query: %v", err)
+		t.Fatalf("Status: %v", err)
 	}
 	if dps == nil {
 		t.Error("dps is nil, want empty map")
 	}
 	if len(dps) != 0 {
-		t.Errorf("dps has %d entries, want 0", len(dps))
+		t.Errorf("got %d dps, want 0", len(dps))
 	}
 }

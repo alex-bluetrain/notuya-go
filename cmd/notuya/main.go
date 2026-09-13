@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/averstraeten/notuya-go/internal/device"
+	"github.com/averstraeten/notuya-go/internal/device/bulb"
 	"github.com/averstraeten/notuya-go/internal/discovery"
 	"github.com/averstraeten/notuya-go/internal/protocol35"
 )
@@ -43,7 +44,7 @@ var commandTimeout = 10 * time.Second
 func main() {
 	configPath := flag.String("config", "", "path to config.json (default: $NOTUYA_CONFIG, or the user config dir)")
 	transition := flag.Int("transition", device.DefaultTransition, "music: per-update fade length, 0-10 (higher is smoother but smears)")
-	interval := flag.Duration("interval", device.DefaultStreamInterval, "music: minimum spacing between colour updates")
+	interval := flag.Duration("interval", bulb.DefaultStreamInterval, "music: minimum spacing between colour updates")
 	flag.Parse()
 	args := flag.Args()
 
@@ -105,11 +106,11 @@ func main() {
 
 	switch cmd {
 	case "on":
-		ok = forEachDevice(cfg.Devices, func(ctx context.Context, b *device.Bulb) error {
+		ok = forEachDevice(cfg.Devices, func(ctx context.Context, b *bulb.Bulb) error {
 			return b.TurnOn(ctx)
 		})
 	case "off":
-		ok = forEachDevice(cfg.Devices, func(ctx context.Context, b *device.Bulb) error {
+		ok = forEachDevice(cfg.Devices, func(ctx context.Context, b *bulb.Bulb) error {
 			return b.TurnOff(ctx)
 		})
 	case "color":
@@ -122,11 +123,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		ok = forEachDevice(cfg.Devices, func(ctx context.Context, bulb *device.Bulb) error {
-			if err := bulb.TurnOn(ctx); err != nil {
+		ok = forEachDevice(cfg.Devices, func(ctx context.Context, bl *bulb.Bulb) error {
+			if err := bl.TurnOn(ctx); err != nil {
 				return err
 			}
-			return bulb.SetColour(ctx, r, g, b)
+			return bl.SetColour(ctx, r, g, b)
 		})
 		if err := writeLastColor(lastColorPath, fmt.Sprintf("%02x%02x%02x", r, g, b)); err != nil {
 			fmt.Fprintln(os.Stderr, "warning: could not save last color:", err)
@@ -141,18 +142,18 @@ func main() {
 			fmt.Fprintln(os.Stderr, "brightness: invalid value:", args[1])
 			os.Exit(1)
 		}
-		ok = forEachDevice(cfg.Devices, func(ctx context.Context, bulb *device.Bulb) error {
-			if err := bulb.TurnOn(ctx); err != nil {
+		ok = forEachDevice(cfg.Devices, func(ctx context.Context, b *bulb.Bulb) error {
+			if err := b.TurnOn(ctx); err != nil {
 				return err
 			}
-			return bulb.SetBrightnessPercent(ctx, pct)
+			return b.SetBrightnessPercent(ctx, float64(pct))
 		})
 	case "music":
 		if *transition < 0 || *transition > device.MaxTransition {
 			fmt.Fprintf(os.Stderr, "transition: must be 0-%d, got %d\n", device.MaxTransition, *transition)
 			os.Exit(1)
 		}
-		opts := device.StreamOptions{Interval: *interval, Transition: transition}
+		opts := bulb.StreamOptions{Interval: *interval, Transition: transition}
 		ok = runMusic(cfg.Devices, lastColorPath, opts)
 	default:
 		fmt.Fprint(os.Stderr, usage)
@@ -212,7 +213,7 @@ func parseColor(raw string) (r, g, b uint8, err error) {
 // mirrors ctl.py's ThreadPoolExecutor-based for_each_device, including
 // its "status() as a connectivity warm-up before the real command" step.
 // forEachDevice reports whether every device succeeded.
-func forEachDevice(devices []Device, fn func(ctx context.Context, b *device.Bulb) error) bool {
+func forEachDevice(devices []Device, fn func(ctx context.Context, b *bulb.Bulb) error) bool {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	failed := 0
@@ -247,12 +248,12 @@ func forEachDevice(devices []Device, fn func(ctx context.Context, b *device.Bulb
 			}
 			defer sess.Close()
 
-			bulb := device.NewBulb(sess, name)
-			if err := bulb.Status(ctx); err != nil {
+			b := bulb.NewBulb(sess, name)
+			if err := b.Status(ctx); err != nil {
 				report(name, err)
 				return
 			}
-			report(name, fn(ctx, bulb))
+			report(name, fn(ctx, b))
 		}(d)
 	}
 	wg.Wait()

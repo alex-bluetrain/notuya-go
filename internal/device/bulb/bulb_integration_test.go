@@ -1,4 +1,4 @@
-package device
+package bulb
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/averstraeten/notuya-go/internal/protocol35"
 )
 
-// TestBulbAgainstRealDevice exercises the full Phase A control surface
+// TestBulbAgainstRealDevice exercises the full business control surface
 // (Status, TurnOn, SetColour, SetBrightnessPercent, TurnOff) against real
 // hardware. Hermetic by default; opt in with NOTUYA_INTEGRATION=1 plus
 // NOTUYA_TEST_IP/NOTUYA_TEST_KEY.

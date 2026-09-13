@@ -46,6 +46,37 @@ func parseHSV16Hex(hex string) (h, s, v int, err error) {
 	return h, s, v, nil
 }
 
+// hsvToHSV16Hex converts h/s/v (each 0-1, as tinytuya's set_hsv takes them)
+// to Tuya's "hsv16" 12-hex-digit encoding, matching tinytuya's
+// hsv_to_hexvalue for the hsv16 format: it truncates the scaled components
+// (h*360, s*1000, v*1000) rather than rounding, for bit-for-bit parity.
+func hsvToHSV16Hex(h, s, v float64) string {
+	return hsv16Hex(int(h*360), int(s*1000), int(v*1000))
+}
+
+// hsv16HexToRGB converts a device's "hsv16" DP 24 value back to 0-255 RGB,
+// matching tinytuya's hexvalue_to_rgb for the hsv16 format: h/s/v are scaled
+// back to [0,1], run through colorsys.hsv_to_rgb, and the result truncated to
+// int after *255.
+func hsv16HexToRGB(hex string) (r, g, b uint8, err error) {
+	h, s, v, err := parseHSV16Hex(hex)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	rf, gf, bf := hsvToRGB(float64(h)/360.0, float64(s)/1000.0, float64(v)/1000.0)
+	return uint8(rf * 255), uint8(gf * 255), uint8(bf * 255), nil
+}
+
+// hsv16HexToHSV converts a device's "hsv16" DP 24 value back to h/s/v each in
+// [0,1], matching tinytuya's hexvalue_to_hsv for the hsv16 format.
+func hsv16HexToHSV(hex string) (h, s, v float64, err error) {
+	hi, si, vi, err := parseHSV16Hex(hex)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return float64(hi) / 360.0, float64(si) / 1000.0, float64(vi) / 1000.0, nil
+}
+
 // rgbToHSV is a direct port of Python's colorsys.rgb_to_hsv (r, g, b, h, s,
 // v all in [0,1]).
 func rgbToHSV(r, g, b float64) (h, s, v float64) {
@@ -72,4 +103,31 @@ func rgbToHSV(r, g, b float64) (h, s, v float64) {
 		h += 1.0
 	}
 	return h, s, v
+}
+
+// hsvToRGB is a direct port of Python's colorsys.hsv_to_rgb (h, s, v, r, g,
+// b all in [0,1]).
+func hsvToRGB(h, s, v float64) (r, g, b float64) {
+	if s == 0.0 {
+		return v, v, v
+	}
+	i := int(h * 6.0)
+	f := (h * 6.0) - float64(i)
+	p := v * (1.0 - s)
+	q := v * (1.0 - s*f)
+	t := v * (1.0 - s*(1.0-f))
+	switch i % 6 {
+	case 0:
+		return v, t, p
+	case 1:
+		return q, v, p
+	case 2:
+		return p, v, t
+	case 3:
+		return p, q, v
+	case 4:
+		return t, p, v
+	default:
+		return v, p, q
+	}
 }

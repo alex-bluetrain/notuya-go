@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/averstraeten/notuya-go/internal/device"
+	"github.com/averstraeten/notuya-go/internal/device/bulb"
 	"github.com/averstraeten/notuya-go/internal/protocol35"
 )
 
@@ -27,7 +28,7 @@ import (
 // the reader or the other bulbs.
 // It reports whether every device streamed successfully, so a failing bulb
 // is visible to a caller that only checks the exit status.
-func runMusic(devices []Device, lastColorPath string, opts device.StreamOptions) bool {
+func runMusic(devices []Device, lastColorPath string, opts bulb.StreamOptions) bool {
 	// SIGINT is the normal way a drag ends (the caller usually pipes a
 	// long-running picker into us), so treat it as a clean stop rather
 	// than letting it kill the process mid-stream and leave the bulb
@@ -58,7 +59,7 @@ func runMusic(devices []Device, lastColorPath string, opts device.StreamOptions)
 		targets = append(targets, target{name: name, colours: colours})
 
 		wg.Add(1)
-		go func(d Device, name string, colours <-chan device.RGB, opts device.StreamOptions) {
+		go func(d Device, name string, colours <-chan device.RGB, opts bulb.StreamOptions) {
 			defer wg.Done()
 			// Drain on failure so a dead device cannot leave the
 			// broadcast loop blocked on a full channel.
@@ -133,7 +134,7 @@ func offer(ch chan device.RGB, c device.RGB) {
 
 // streamDevice opens one session and streams colours to it for the whole
 // run, then leaves the bulb on the last colour it received.
-func streamDevice(ctx context.Context, d Device, name string, colours <-chan device.RGB, opts device.StreamOptions) error {
+func streamDevice(ctx context.Context, d Device, name string, colours <-chan device.RGB, opts bulb.StreamOptions) error {
 	sess := protocol35.NewSession(d.IPAddress, []byte(d.LocalKey))
 
 	openCtx, cancel := context.WithTimeout(ctx, commandTimeout)
@@ -143,7 +144,7 @@ func streamDevice(ctx context.Context, d Device, name string, colours <-chan dev
 	}
 	defer sess.Close()
 
-	bulb := device.NewBulb(sess, name)
+	b := bulb.NewBulb(sess, name)
 
 	// Tap the stream to remember the last colour, so the bulb can be left
 	// holding it. Reading last/haveOne is safe only after tapped is
@@ -161,7 +162,7 @@ func streamDevice(ctx context.Context, d Device, name string, colours <-chan dev
 		}
 	}()
 
-	streamErr := bulb.StreamColours(ctx, tapped, opts)
+	streamErr := b.StreamColours(ctx, tapped, opts)
 
 	// Drain whatever is still queued: on an early stream error nothing
 	// else would consume tapped, and its goroutine would leak blocked on
@@ -181,7 +182,7 @@ func streamDevice(ctx context.Context, d Device, name string, colours <-chan dev
 	// up. A fresh context because ctx is already cancelled on SIGINT.
 	finalCtx, cancelFinal := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancelFinal()
-	if err := bulb.SetColour(finalCtx, last.R, last.G, last.B); err != nil {
+	if err := b.SetColour(finalCtx, last.R, last.G, last.B); err != nil {
 		return fmt.Errorf("leaving music mode: %w", err)
 	}
 	return nil

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/device"
+	"github.com/averstraeten/notuya-go/internal/device/bulb"
 )
 
 // shortTimeout keeps these tests fast: they only need the dial to fail, not
@@ -40,7 +40,7 @@ func TestForEachDeviceReportsFailure(t *testing.T) {
 	shortTimeout(t)
 
 	called := false
-	ok := forEachDevice(unreachable(1), func(ctx context.Context, b *device.Bulb) error {
+	ok := forEachDevice(unreachable(1), func(ctx context.Context, b *bulb.Bulb) error {
 		called = true
 		return nil
 	})
@@ -56,7 +56,7 @@ func TestForEachDeviceReportsFailure(t *testing.T) {
 func TestForEachDeviceFailsIfAnyDeviceFails(t *testing.T) {
 	shortTimeout(t)
 
-	ok := forEachDevice(unreachable(3), func(ctx context.Context, b *device.Bulb) error {
+	ok := forEachDevice(unreachable(3), func(ctx context.Context, b *bulb.Bulb) error {
 		return errors.New("unused: the session never opens")
 	})
 	if ok {
@@ -65,7 +65,7 @@ func TestForEachDeviceFailsIfAnyDeviceFails(t *testing.T) {
 }
 
 func TestForEachDeviceSucceedsWithNoDevices(t *testing.T) {
-	if !forEachDevice(nil, func(ctx context.Context, b *device.Bulb) error {
+	if !forEachDevice(nil, func(ctx context.Context, b *bulb.Bulb) error {
 		return nil
 	}) {
 		t.Error("forEachDevice = false for an empty device list, want true")

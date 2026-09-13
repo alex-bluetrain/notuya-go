@@ -14,22 +14,39 @@ cmd/notuya/config.go        CLI: config.json loading and last-color cache
 internal/
   protocol/                  Version-agnostic interface (Session)
   protocol35/                v3.5 implementation: 6699 framing, AES-GCM, session handshake
-  device/                    Bulb API and DP encoding
+  device/                    Raw DP-centric API and DP encoding (tinytuya BulbDevice surface)
+  device/bulb/               Business layer: Bulb domain methods + music streaming
   discovery/                 UDP scanner (ports 6667/7000)
 ```
 
 ### Dependency flow
 
 ```
-cmd/notuya → device, discovery, protocol35
-device     → protocol (the interface, never protocol35 directly)
-discovery  → protocol, protocol35 (uses EncodeFrame/DecodeFrame with the fixed discovery key)
-protocol35 → protocol (command constants)
+cmd/notuya   → device, device/bulb, discovery, protocol35
+device/bulb  → device, protocol
+device       → protocol (the interface, never protocol35 directly)
+discovery    → protocol, protocol35 (uses EncodeFrame/DecodeFrame with the fixed discovery key)
+protocol35   → protocol (command constants)
 ```
 
-`device` depends only on `protocol.Session`. Adding support for another
-version (3.1/3.3) means writing a new `protocol3x.Session` implementing the
-same interface — without touching `device` or the CLI.
+`device` and `device/bulb` depend only on `protocol.Session`. Adding support
+for another version (3.1/3.3) means writing a new `protocol3x.Session`
+implementing the same interface — without touching `device`, `bulb`, or the
+CLI.
+
+The split mirrors tinytuya: `device.Device` is the raw, DP-centric layer
+(`SetDPs`, `SetValue`, and typed helpers like `SetColour`/`SetHSV`/
+`SetWhite`/`SetWhitePercent`/`SetColourTemp`/`SetColourTempPercent`/
+`SetScene`/`SetMode`/`SetMusicColour`, plus getters `Status`/`GetMode`/
+`GetBrightness`/`GetBrightnessPercent`/`GetColourTemp`/
+`GetColourTempPercent`/`ColourRGB`/`ColourHSV`, each write taking
+`wait bool` and speaking DP numbers), the equivalent of `BulbDevice`.
+`bulb.Bulb` is the business layer built *on top*
+of `*device.Device`: its domain methods (`TurnOn`, `SetColour`,
+`SetBrightnessPercent`, `StreamColours`) always use `wait=true` internally
+and never expose a DP number. The CLI uses `bulb.Bulb` for the known
+commands; `device.Device` is exported so a caller can drive an arbitrary DP
+the business layer does not cover.
 
 `internal/` is the library: it talks to bulbs and knows nothing else. No
 package under it prints, exits, reads the environment, or touches the
@@ -63,7 +80,7 @@ type StreamSession interface {
 ```
 
 `wait=false` in `Command` is the fire-and-forget send used by music mode
-(see below). `StreamSession` is an optional add-on: `device.StreamColours`
+(see below). `StreamSession` is an optional add-on: `bulb.StreamColours`
 type-asserts for it and reports a clear error for a version that lacks it,
 so 3.1/3.3 can be added later without implementing streaming on day one.
 
@@ -221,10 +238,47 @@ and `XenonDevice.py`. Most of what is missing here is missing on purpose.
 `set_socketRetryDelay`, `set_socketTimeout`, `set_sendWait`,
 `cached_status`, `detect_available_dps`…), each one a flag multiplying the
 reachable states. `protocol.Session` has three methods. That is the point
-of this codebase, and feature parity is not a reason to give it up. Same
-for generic `set_value`/`updatedps`: they would dissolve `device` as the
-layer that knows what each DP *means*, which is the only reason the CLI
-never touches a DP number.
+of this codebase, and feature parity is not a reason to give it up.
+
+**Adopted, but layered.** tinytuya's generic `set_value`/raw-DP access is
+replicated — `device.Device.SetValue`/`SetDPs` — but it lives in the raw
+layer, not at the same level as the domain commands. `bulb.Bulb` is the
+layer that knows what each DP *means*, which is why the CLI's known commands
+still never touch a DP number; a caller who needs an uncovered DP reaches
+for `device.Device` deliberately.
+
+`device.Device` also carries the rest of `BulbDevice`'s "sugar" surface with
+faithful signatures — the one change is `nowait bool` → `wait bool`, to match
+`Session`. Setters: `SetHSV` (h/s/v each 0-1), `SetScene`,
+`SetWhitePercent`, `SetColourTempPercent`. Getters:
+`GetMode`/`GetBrightness`/`GetBrightnessPercent`/`GetColourTemp`/
+`GetColourTempPercent`/`ColourRGB`/`ColourHSV`. The percentage helpers
+scale against `BrightnessMax` (1000, the Type-B full scale) and truncate to
+the raw DP int. tinytuya takes an int percent (`value_max * pct // 100`);
+here the percent setters/getters are all `float64` so the surface is
+symmetric (you write what a getter would return) and fractional percents
+scale — 33.3% → 333, where int 33 would give 330.
+`SetHSV`/`ColourRGB`/`ColourHSV` round-trip through ports of
+`colorsys.hsv_to_rgb`/`rgb_to_hsv` with truncation, for bit-for-bit parity
+(see `colour.go`). `SetScene` uses the "Type A" layout (scene index folded
+into the mode enum as `scene_<n>`), since the A60TY10W has no separate
+scene_data DP. `SetMode` asserts `switch:true` alongside the mode, as
+tinytuya does.
+
+Two deliberate departures from tinytuya's exact behaviour here:
+
+- **`SetHSV` (and `SetColour`) do not force the bulb on.** tinytuya's
+  `set_hsv`/`set_colour` assert `switch:true`; here both only set mode +
+  colour and leave on/off to `TurnOn`/`TurnOff`. Setting a colour on an
+  off bulb should not silently turn it on, and the two colour setters must
+  agree on that.
+- **The getters mirror tinytuya's optional `state=` parameter with a pair
+  of forms.** `GetX(ctx)` fetches a fresh `Status` and reads one value —
+  the one-shot path `Status` already served as tinytuya's `state()`.
+  `GetXFrom(status)` (`GetModeFrom`, `ColourRGBFrom`, …) reads from a
+  status map the caller already fetched, so printing full state costs one
+  round-trip instead of one per getter. The `GetX(ctx)` forms are just
+  `Status` + the matching `GetXFrom`.
 
 **Deferred, with a known trigger.**
 
@@ -240,9 +294,15 @@ never touches a DP number.
   not on this LAN is not worth carrying, but this is the likeliest thing to
   break on a different model — the symptom is a set that returns an error
   payload while each DP works alone.
+- `set_timer` (`BulbDevice.py:489`): not wrapped. The A60TY10W's DP table
+  has no timer DP, and inventing a number for one that is not on this
+  hardware is worse than the gap. A caller that has a timer DP drives it
+  with `SetValue(dp, secs, wait)`, which is exactly tinytuya's `dps_id`
+  override path.
 
 **Where tinytuya is structurally worse.** Composition instead of
-inheritance (`Bulb` → `client` → `Session`, not `Device(XenonDevice)`), and
+inheritance (`bulb.Bulb` → `device.Device` → `Session`, not
+`Device(XenonDevice)`), and
 version-as-package instead of `if self.version` scattered through the
 methods. Worth an honest caveat: this stays clean partly because the
 problem is smaller. tinytuya carries five protocol versions, a cloud API and
@@ -261,9 +321,11 @@ NOTUYA_INTEGRATION=1 \
 - `protocol35/frame_test.go`: 6699 frame encode/decode round-trip, corruption rejection, retcode stripping.
 - `protocol35/handshake_test.go`: validation against a real capture fixture (`testdata/handshake/session1.json`).
 - `cmd/notuya/config_test.go`: config.json parsing and last-color round-trip.
-- `device/client_test.go`: CONTROL_NEW/DP_QUERY_NEW payload construction against a mock session.
-- `device/colour_test.go`: RGB ↔ hsv16 hex round-trip.
-- `device/music_test.go`: DP 28 encoding, streaming payload shape, latest-wins coalescing, drain shutdown.
+- `device/device_test.go`: CONTROL_NEW/DP_QUERY_NEW payload construction (`SetDPs`/`SetValue`), fire-and-forget sends, and `Status` response parsing against a mock session.
+- `device/sugar_test.go`: the sugar setters (`SetHSV` — which must *not* assert the switch — `SetScene`, `SetWhitePercent`, `SetColourTempPercent`, `SetMode`'s switch assertion) produce the right DP payloads, both getter forms (`GetX(ctx)` and `GetXFrom(status)`) parse a mock status, and range checks reject out-of-range input.
+- `device/colour_test.go`: RGB ↔ hsv16 hex round-trip, plus the h/s/v → hsv16 (`SetHSV`) and hsv16 → RGB (`ColourRGB`) paths against tinytuya reference vectors.
+- `device/music_test.go`: DP 28 (`musicColourHex`) encoding and transition-range validation.
+- `device/bulb/music_test.go`: streaming payload shape, latest-wins coalescing, zero-transition handling, drain shutdown, and the StreamSession capability check.
 - `discovery/discovery_test.go`: fixed discovery key validation, plus the announcement parsing each scanner bug hid in — retcode-prefixed replies, bare announcements, our own request echoed back, duplicate broadcast targets.
 - `cmd/notuya/music_test.go`: the stdin broadcast never blocks and keeps the newest colour.
 - `cmd/notuya/foreach_test.go`: a failing device makes the CLI exit non-zero. Uses `192.0.2.1` (RFC 5737 TEST-NET-1, guaranteed unroutable) and shortens `commandTimeout`, which is a `var` only so this test does not spend 10s per dial.
@@ -275,9 +337,13 @@ handshake over a real TCP socket. `protocol35/stream_test.go` uses it for the
 concurrency contract (fire-and-forget writes racing `DrainInbound`, session
 hand-back, dropped connection, and a send outliving the context that opened
 the session), and `protocol35/music_e2e_test.go` runs the
-actual `device.StreamColours` loop against it end-to-end. These live in
-`protocol35` rather than `device` because the fixture belongs there and
-`device` does not import `protocol35`.
+actual `bulb.StreamColours` loop against it end-to-end. These live in
+`protocol35` rather than `device/bulb` because the fixture belongs there and
+neither `device` nor `bulb` imports `protocol35`.
+
+- `device/bulb/bulb_integration_test.go`: the full business surface
+  (`Status`, `TurnOn`, `SetColour`, `SetBrightnessPercent`, `TurnOff`)
+  against real hardware, gated behind `NOTUYA_INTEGRATION`.
 
 Run the streaming tests with `-race`: they are the only concurrent paths in
 the project.
@@ -302,11 +368,11 @@ project's `picker.py`. See the DP 28 section above for the wire format and
 the mode entry/exit rules.
 
 `--transition` (0-10) and `--interval` are exposed as flags for tuning drag
-feel by hand. `StreamOptions.Transition` is a `*int` rather than an `int`
-because 0 is a meaningful value (no fade), so it cannot double as "unset";
-use `device.Transition(n)` to build one.
+feel by hand. `bulb.StreamOptions.Transition` is a `*int` rather than an
+`int` because 0 is a meaningful value (no fade), so it cannot double as
+"unset"; use `bulb.Transition(n)` to build one.
 
-The flow, in `device.StreamColours`:
+The flow, in `bulb.StreamColours`:
 
 1. Blocking `Status()` warm-up, while the connection is still exclusively
    owned — a dead session fails here instead of silently dropping colours.
