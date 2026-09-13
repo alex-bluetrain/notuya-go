@@ -13,6 +13,6 @@
 // tinytuya does, and let the device reject anything it dislikes.
 //
 // The high-level business surface (single-shot commands with no wait flag,
-// plus the music-mode streaming loop) lives in the sub-package bulb, built
-// on top of Device.
+// plus the music-mode streaming loop) lives in the sibling package bulb,
+// built on top of Device.
 package device

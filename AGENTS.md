@@ -15,21 +15,21 @@ internal/
   protocol/                  Version-agnostic interface (Session)
   protocol35/                v3.5 implementation: 6699 framing, AES-GCM, session handshake
   device/                    Raw DP-centric API and DP encoding (tinytuya BulbDevice surface)
-  device/bulb/               Business layer: Bulb domain methods + music streaming
+  bulb/                      Business layer: Bulb domain methods + music streaming
   discovery/                 UDP scanner (ports 6667/7000)
 ```
 
 ### Dependency flow
 
 ```
-cmd/notuya   → device, device/bulb, discovery, protocol35
-device/bulb  → device, protocol
+cmd/notuya   → device, bulb, discovery, protocol35
+bulb         → device, protocol
 device       → protocol (the interface, never protocol35 directly)
 discovery    → protocol, protocol35 (uses EncodeFrame/DecodeFrame with the fixed discovery key)
 protocol35   → protocol (command constants)
 ```
 
-`device` and `device/bulb` depend only on `protocol.Session`. Adding support
+`device` and `bulb` depend only on `protocol.Session`. Adding support
 for another version (3.1/3.3) means writing a new `protocol3x.Session`
 implementing the same interface — without touching `device`, `bulb`, or the
 CLI.
@@ -325,7 +325,7 @@ NOTUYA_INTEGRATION=1 \
 - `device/sugar_test.go`: the sugar setters (`SetHSV` — which must *not* assert the switch — `SetScene`, `SetWhitePercent`, `SetColourTempPercent`, `SetMode`'s switch assertion) produce the right DP payloads, both getter forms (`GetX(ctx)` and `GetXFrom(status)`) parse a mock status, and range checks reject out-of-range input.
 - `device/colour_test.go`: RGB ↔ hsv16 hex round-trip, plus the h/s/v → hsv16 (`SetHSV`) and hsv16 → RGB (`ColourRGB`) paths against tinytuya reference vectors.
 - `device/music_test.go`: DP 28 (`musicColourHex`) encoding and transition-range validation.
-- `device/bulb/music_test.go`: streaming payload shape, latest-wins coalescing, zero-transition handling, drain shutdown, and the StreamSession capability check.
+- `bulb/music_test.go`: streaming payload shape, latest-wins coalescing, zero-transition handling, drain shutdown, and the StreamSession capability check.
 - `discovery/discovery_test.go`: fixed discovery key validation, plus the announcement parsing each scanner bug hid in — retcode-prefixed replies, bare announcements, our own request echoed back, duplicate broadcast targets.
 - `cmd/notuya/music_test.go`: the stdin broadcast never blocks and keeps the newest colour.
 - `cmd/notuya/foreach_test.go`: a failing device makes the CLI exit non-zero. Uses `192.0.2.1` (RFC 5737 TEST-NET-1, guaranteed unroutable) and shortens `commandTimeout`, which is a `var` only so this test does not spend 10s per dial.
@@ -338,10 +338,10 @@ concurrency contract (fire-and-forget writes racing `DrainInbound`, session
 hand-back, dropped connection, and a send outliving the context that opened
 the session), and `protocol35/music_e2e_test.go` runs the
 actual `bulb.StreamColours` loop against it end-to-end. These live in
-`protocol35` rather than `device/bulb` because the fixture belongs there and
+`protocol35` rather than `bulb` because the fixture belongs there and
 neither `device` nor `bulb` imports `protocol35`.
 
-- `device/bulb/bulb_integration_test.go`: the full business surface
+- `bulb/bulb_integration_test.go`: the full business surface
   (`Status`, `TurnOn`, `SetColour`, `SetBrightnessPercent`, `TurnOff`)
   against real hardware, gated behind `NOTUYA_INTEGRATION`.
 

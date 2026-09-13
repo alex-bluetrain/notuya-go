@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/device/bulb"
+	"github.com/averstraeten/notuya-go/internal/bulb"
 )
 
 // shortTimeout keeps these tests fast: they only need the dial to fail, not

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/averstraeten/notuya-go/internal/bulb"
 	"github.com/averstraeten/notuya-go/internal/device"
-	"github.com/averstraeten/notuya-go/internal/device/bulb"
 	"github.com/averstraeten/notuya-go/internal/protocol"
 )
 

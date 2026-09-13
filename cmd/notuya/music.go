@@ -9,8 +9,8 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/averstraeten/notuya-go/internal/bulb"
 	"github.com/averstraeten/notuya-go/internal/device"
-	"github.com/averstraeten/notuya-go/internal/device/bulb"
 	"github.com/averstraeten/notuya-go/internal/protocol35"
 )
 
