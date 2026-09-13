@@ -344,6 +344,10 @@ actual `bulb.StreamColours` loop against it end-to-end. These live in
 `protocol35` rather than `bulb` because the fixture belongs there and
 neither `device` nor `bulb` imports `protocol35`.
 
+- `bulb/raw_test.go`: `Raw()` returns the Bulb's own `*device.Device` wired
+  to the same session, so a raw DP write goes out as a CONTROL_NEW. `Raw()`
+  has no CLI consumer yet; this test is what keeps that deliberate public
+  surface exercised.
 - `bulb/bulb_integration_test.go`: the full business surface
   (`Status`, `TurnOn`, `SetColour`, `SetBrightnessPercent`, `TurnOff`)
   against real hardware, gated behind `NOTUYA_INTEGRATION`.
