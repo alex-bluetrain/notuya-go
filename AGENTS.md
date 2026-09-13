@@ -9,6 +9,7 @@ for a Python runtime.
 
 ```
 cmd/notuya/main.go          CLI: on, off, color, brightness, get-color, list, scan
+cmd/notuya/scan.go          CLI: scan --update (merge scanned IPs into config.json by device_id)
 cmd/notuya/music.go         CLI: music (stdin colour streaming)
 cmd/notuya/config.go        CLI: config.json loading and last-color cache
 internal/
@@ -208,6 +209,20 @@ Only the `devices` array of the JSON is read. Each device has:
 `device_id`, `ip_address`, `local_key`, `name`. The format is compatible
 with the Python project's `config.json`.
 
+`notuya scan --update` is the one command that *writes* the config back —
+the equivalent of tinytuya's wizard re-writing `devices.json` after a poll.
+A scan never learns a `local_key`, so devices are matched by `device_id`
+(not IP) and only `ip_address` is rewritten, which is the field DHCP
+changes. The rewrite edits the raw JSON tree (`map[string]json.RawMessage`)
+rather than reserialising the typed `Config`, so the unmodelled top-level
+keys the Python project keeps (`follow_mode`, `theme_color`, …) and any
+extra per-device fields survive untouched. A scan that matches nothing
+leaves the file byte-for-byte alone. This lives in `cmd/notuya/scan.go`
+because it is CLI policy — `internal/` never touches the filesystem. Note
+that broadcast discovery does not reach devices on every network (see the
+Discovery section), so `--update` is only as good as what the scan finds;
+a fixed IP edited by hand is always the fallback.
+
 ## Code conventions
 
 - **Go 1.23**, module `github.com/averstraeten/notuya-go`.
@@ -324,11 +339,12 @@ NOTUYA_INTEGRATION=1 \
 - `protocol35/frame_test.go`: 6699 frame encode/decode round-trip, corruption rejection, retcode stripping.
 - `protocol35/handshake_test.go`: validation against a real capture fixture (`testdata/handshake/session1.json`).
 - `cmd/notuya/config_test.go`: config.json parsing and last-color round-trip.
+- `cmd/notuya/scan_test.go`: `scan --update` merges a scan result into config.json by `device_id` — rewrites a matched IP, preserves `local_key`/`name`/unmodelled top-level keys, and leaves the file untouched when nothing matches or the IP is unchanged.
 - `device/device_test.go`: CONTROL_NEW/DP_QUERY_NEW payload construction (`SetDPs`/`SetValue`), fire-and-forget sends, and `Status` response parsing against a mock session.
 - `device/sugar_test.go`: the sugar setters (`SetHSV` — which must *not* assert the switch — `SetScene`, `SetWhitePercent`, `SetColourTempPercent`, `SetMode`'s switch assertion) produce the right DP payloads, both getter forms (`GetX(ctx)` and `GetXFrom(status)`) parse a mock status, and range checks reject out-of-range input.
 - `device/colour_test.go`: RGB ↔ hsv16 hex round-trip, plus the h/s/v → hsv16 (`SetHSV`) and hsv16 → RGB (`ColourRGB`) paths against tinytuya reference vectors.
 - `device/music_test.go`: DP 28 (`musicColourHex`) encoding and transition-range validation.
-- `bulb/music_test.go`: streaming payload shape, latest-wins coalescing, zero-transition handling, drain shutdown, and the StreamSession capability check.
+- `bulb/music_test.go`: streaming payload shape, latest-wins coalescing, zero-transition handling, per-colour transition override (nil falls back to the run default), drain shutdown, and the StreamSession capability check.
 - `discovery/discovery_test.go`: fixed discovery key validation, plus the announcement parsing each scanner bug hid in — retcode-prefixed replies, bare announcements, our own request echoed back, duplicate broadcast targets.
 - `cmd/notuya/music_test.go`: the stdin broadcast never blocks and keeps the newest colour.
 - `cmd/notuya/foreach_test.go`: a failing device makes the CLI exit non-zero. Uses `192.0.2.1` (RFC 5737 TEST-NET-1, guaranteed unroutable) and shortens `commandTimeout`, which is a `var` only so this test does not spend 10s per dial.

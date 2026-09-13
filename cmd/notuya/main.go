@@ -29,7 +29,7 @@ const usage = `Usage:
                           [--transition 0-10] [--interval 40ms]
   notuya get-color
   notuya list
-  notuya scan
+  notuya scan             [--update: rewrite config.json IPs, matched by device_id]
 `
 
 // scanTimeout is generous because devices ignore the first couple of
@@ -64,12 +64,24 @@ func main() {
 	}
 
 	if cmd == "scan" {
+		// Parse flags that follow the subcommand (Go's flag package stops
+		// at the first positional), so `notuya scan --update` works.
+		scanFlags := flag.NewFlagSet("scan", flag.ExitOnError)
+		scanUpdate := scanFlags.Bool("update", false, "rewrite config.json ip_address for every device matched by device_id")
+		_ = scanFlags.Parse(args[1:])
+
 		ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
 		defer cancel()
 		devices, err := discovery.Scan(ctx, scanTimeout)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
+		}
+		if *scanUpdate {
+			if !updateConfigIPs(path, devices) {
+				os.Exit(1)
+			}
+			return
 		}
 		for _, d := range devices {
 			fmt.Printf("%s\t%s\t%s\n", d.ID, d.IP, d.Version)
