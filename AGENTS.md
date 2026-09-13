@@ -390,10 +390,22 @@ configured device over a persistent session — the equivalent of the Python
 project's `picker.py`. See the DP 28 section above for the wire format and
 the mode entry/exit rules.
 
+A stdin line is `RRGGBB` or `RRGGBB TT`: the optional second token is a
+per-line transition (0-10) that overrides `--transition` for that colour.
+This is what lets a picker's transition slider take effect live — the flag
+sets a fixed value for the whole session, but the slider streams the new
+value with each colour, without relaunching the process. A line whose
+transition is out of range is reported to stderr and skipped; the stream
+stays alive. The unit that flows through the stream is `bulb.StreamColour`
+(a `device.RGB` plus an optional `*int` transition); a nil transition falls
+back to `StreamOptions.Transition`, so a producer that only ever writes bare
+`RRGGBB` behaves exactly as before.
+
 `--transition` (0-10) and `--interval` are exposed as flags for tuning drag
-feel by hand. `bulb.StreamOptions.Transition` is a `*int` rather than an
-`int` because 0 is a meaningful value (no fade), so it cannot double as
-"unset"; use `bulb.Transition(n)` to build one.
+feel by hand. `--transition` is the default for lines that omit their own.
+`bulb.StreamOptions.Transition` (and `bulb.StreamColour.Transition`) is a
+`*int` rather than an `int` because 0 is a meaningful value (no fade), so it
+cannot double as "unset"; use `bulb.Transition(n)` to build one.
 
 The flow, in `bulb.StreamColours`:
 

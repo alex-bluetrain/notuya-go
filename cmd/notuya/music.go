@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -38,7 +40,7 @@ func runMusic(devices []Device, lastColorPath string, opts bulb.StreamOptions) b
 
 	type target struct {
 		name    string
-		colours chan device.RGB
+		colours chan bulb.StreamColour
 	}
 
 	targets := make([]target, 0, len(devices))
@@ -55,11 +57,11 @@ func runMusic(devices []Device, lastColorPath string, opts bulb.StreamOptions) b
 		}
 		// Buffer of one, with the producer dropping stale colours: the
 		// newest colour is the only one worth delivering.
-		colours := make(chan device.RGB, 1)
+		colours := make(chan bulb.StreamColour, 1)
 		targets = append(targets, target{name: name, colours: colours})
 
 		wg.Add(1)
-		go func(d Device, name string, colours <-chan device.RGB, opts bulb.StreamOptions) {
+		go func(d Device, name string, colours <-chan bulb.StreamColour, opts bulb.StreamOptions) {
 			defer wg.Done()
 			// Drain on failure so a dead device cannot leave the
 			// broadcast loop blocked on a full channel.
@@ -81,14 +83,27 @@ func runMusic(devices []Device, lastColorPath string, opts bulb.StreamOptions) b
 		if line == "" {
 			continue
 		}
-		r, g, b, err := parseColor(line)
+		// A stdin line is "RRGGBB" or "RRGGBB TT": the optional second
+		// token is a per-line transition (0-10) so a picker's transition
+		// slider takes effect live, without relaunching the process.
+		colorTok, transTok, _ := strings.Cut(strings.TrimSpace(line), " ")
+		r, g, b, err := parseColor(colorTok)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			continue
 		}
+		var transition *int
+		if transTok = strings.TrimSpace(transTok); transTok != "" {
+			t, err := strconv.Atoi(transTok)
+			if err != nil || t < 0 || t > device.MaxTransition {
+				fmt.Fprintf(os.Stderr, "music: invalid transition %q (want 0-%d)\n", transTok, device.MaxTransition)
+				continue
+			}
+			transition = &t
+		}
 		lastColor = fmt.Sprintf("%02x%02x%02x", r, g, b)
 		for _, t := range targets {
-			offer(t.colours, device.RGB{R: r, G: g, B: b})
+			offer(t.colours, bulb.StreamColour{RGB: device.RGB{R: r, G: g, B: b}, Transition: transition})
 		}
 		if ctx.Err() != nil {
 			break
@@ -118,7 +133,7 @@ func runMusic(devices []Device, lastColorPath string, opts bulb.StreamOptions) b
 // offer delivers c to ch, discarding an undelivered older colour if one is
 // still queued. It never blocks: stdin must keep being read at full speed
 // even while a bulb is mid-send.
-func offer(ch chan device.RGB, c device.RGB) {
+func offer(ch chan bulb.StreamColour, c bulb.StreamColour) {
 	for {
 		select {
 		case ch <- c:
@@ -134,7 +149,7 @@ func offer(ch chan device.RGB, c device.RGB) {
 
 // streamDevice opens one session and streams colours to it for the whole
 // run, then leaves the bulb on the last colour it received.
-func streamDevice(ctx context.Context, d Device, name string, colours <-chan device.RGB, opts bulb.StreamOptions) error {
+func streamDevice(ctx context.Context, d Device, name string, colours <-chan bulb.StreamColour, opts bulb.StreamOptions) error {
 	sess := protocol35.NewSession(d.IPAddress, []byte(d.LocalKey))
 
 	openCtx, cancel := context.WithTimeout(ctx, commandTimeout)
@@ -150,10 +165,10 @@ func streamDevice(ctx context.Context, d Device, name string, colours <-chan dev
 	// holding it. Reading last/haveOne is safe only after tapped is
 	// drained to completion, which is what the loop below guarantees.
 	var (
-		last    device.RGB
+		last    bulb.StreamColour
 		haveOne bool
 	)
-	tapped := make(chan device.RGB)
+	tapped := make(chan bulb.StreamColour)
 	go func() {
 		defer close(tapped)
 		for c := range colours {
@@ -182,7 +197,7 @@ func streamDevice(ctx context.Context, d Device, name string, colours <-chan dev
 	// up. A fresh context because ctx is already cancelled on SIGINT.
 	finalCtx, cancelFinal := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancelFinal()
-	if err := b.SetColour(finalCtx, last.R, last.G, last.B); err != nil {
+	if err := b.SetColour(finalCtx, last.RGB.R, last.RGB.G, last.RGB.B); err != nil {
 		return fmt.Errorf("leaving music mode: %w", err)
 	}
 	return nil

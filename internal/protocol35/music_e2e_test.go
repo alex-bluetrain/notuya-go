@@ -26,7 +26,7 @@ func TestStreamColoursEndToEnd(t *testing.T) {
 
 	b := bulb.NewBulb(sess, "e2e-test-bulb")
 
-	colours := make(chan device.RGB)
+	colours := make(chan bulb.StreamColour)
 	done := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -41,7 +41,7 @@ func TestStreamColoursEndToEnd(t *testing.T) {
 	// making the assertion on the final colour deterministic.
 	sequence := []device.RGB{{R: 255}, {G: 255}, {B: 255}}
 	for _, c := range sequence {
-		colours <- c
+		colours <- bulb.StreamColour{RGB: c}
 		time.Sleep(20 * time.Millisecond)
 	}
 	close(colours)

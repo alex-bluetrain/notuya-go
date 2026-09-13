@@ -121,8 +121,8 @@ func TestStreamColoursHonoursZeroTransition(t *testing.T) {
 	mock := newMockStreamSession()
 	b := NewBulb(mock, "test")
 
-	colours := make(chan device.RGB, 1)
-	colours <- device.RGB{R: 255}
+	colours := make(chan StreamColour, 1)
+	colours <- StreamColour{RGB: device.RGB{R: 255}}
 	close(colours)
 
 	err := b.StreamColours(context.Background(), colours, StreamOptions{
@@ -149,8 +149,8 @@ func TestStreamColoursPayloadShape(t *testing.T) {
 	mock := newMockStreamSession()
 	b := NewBulb(mock, "test")
 
-	colours := make(chan device.RGB, 1)
-	colours <- device.RGB{R: 255}
+	colours := make(chan StreamColour, 1)
+	colours <- StreamColour{RGB: device.RGB{R: 255}}
 	close(colours)
 
 	err := b.StreamColours(context.Background(), colours, StreamOptions{
@@ -210,7 +210,7 @@ func TestStreamColoursCoalesces(t *testing.T) {
 	mock := newMockStreamSession()
 	b := NewBulb(mock, "test")
 
-	colours := make(chan device.RGB)
+	colours := make(chan StreamColour)
 	done := make(chan error, 1)
 	go func() {
 		done <- b.StreamColours(context.Background(), colours, StreamOptions{
@@ -221,7 +221,7 @@ func TestStreamColoursCoalesces(t *testing.T) {
 
 	// Push a burst well inside one interval; only the last should survive.
 	for i := range 10 {
-		colours <- device.RGB{R: uint8(i)}
+		colours <- StreamColour{RGB: device.RGB{R: uint8(i)}}
 	}
 	close(colours)
 
@@ -257,7 +257,7 @@ func TestStreamColoursStopsDrainOnReturn(t *testing.T) {
 	mock := newMockStreamSession()
 	b := NewBulb(mock, "test")
 
-	colours := make(chan device.RGB)
+	colours := make(chan StreamColour)
 	close(colours)
 
 	if err := b.StreamColours(context.Background(), colours, StreamOptions{}); err != nil {
@@ -280,11 +280,61 @@ func TestStreamColoursStopsDrainOnReturn(t *testing.T) {
 // protocol version that has no streaming support.
 func TestStreamColoursRequiresStreamSession(t *testing.T) {
 	b := NewBulb(nonStreamSession{}, "test")
-	colours := make(chan device.RGB)
+	colours := make(chan StreamColour)
 	close(colours)
 
 	err := b.StreamColours(context.Background(), colours, StreamOptions{})
 	if err == nil {
 		t.Fatal("expected an error for a session without streaming support, got nil")
+	}
+}
+
+// lastMusicHex runs a single-colour stream and returns the DP 28 value that
+// reached the wire, so a test can assert which transition was encoded.
+func lastMusicHex(t *testing.T, c StreamColour, opts StreamOptions) string {
+	t.Helper()
+	mock := newMockStreamSession()
+	b := NewBulb(mock, "test")
+
+	colours := make(chan StreamColour, 1)
+	colours <- c
+	close(colours)
+
+	if opts.Interval <= 0 {
+		opts.Interval = time.Millisecond
+	}
+	if err := b.StreamColours(context.Background(), colours, opts); err != nil {
+		t.Fatalf("StreamColours: %v", err)
+	}
+	for i := len(mock.recorded()) - 1; i >= 0; i-- {
+		call := mock.recorded()[i]
+		if call.cmd != protocol.ControlNew {
+			continue
+		}
+		if s, ok := musicDPSFromPayload(t, call.payload)[device.DPMusic].(string); ok {
+			return s
+		}
+	}
+	t.Fatal("no colour was sent")
+	return ""
+}
+
+// TestStreamColoursPerColourTransition checks that a StreamColour carrying
+// its own transition overrides the run default, while one that leaves it nil
+// falls back to StreamOptions.Transition. This is what lets a picker's
+// transition slider take effect live.
+func TestStreamColoursPerColourTransition(t *testing.T) {
+	opts := StreamOptions{Transition: Transition(1)}
+
+	// A per-colour transition (7) must reach the wire, not the default (1).
+	got := lastMusicHex(t, StreamColour{RGB: device.RGB{R: 255}, Transition: Transition(7)}, opts)
+	if want := musicColourHexRef(t, 7, 255, 0, 0); got != want {
+		t.Errorf("per-colour transition: DP %s = %q, want %q", device.DPMusic, got, want)
+	}
+
+	// A nil transition falls back to the run default (1).
+	got = lastMusicHex(t, StreamColour{RGB: device.RGB{G: 255}}, opts)
+	if want := musicColourHexRef(t, 1, 0, 255, 0); got != want {
+		t.Errorf("nil transition: DP %s = %q, want %q", device.DPMusic, got, want)
 	}
 }

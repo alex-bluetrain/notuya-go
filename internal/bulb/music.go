@@ -38,6 +38,15 @@ type StreamOptions struct {
 // Transition returns a pointer suitable for StreamOptions.Transition.
 func Transition(n int) *int { return &n }
 
+// StreamColour is one unit of a colour stream: a colour plus an optional
+// per-update fade length. A nil Transition falls back to the run's default
+// (StreamOptions.Transition), so a producer that never sets it behaves
+// exactly as if it streamed bare colours.
+type StreamColour struct {
+	RGB        device.RGB
+	Transition *int
+}
+
 func (o StreamOptions) withDefaults() StreamOptions {
 	if o.Interval <= 0 {
 		o.Interval = DefaultStreamInterval
@@ -69,7 +78,7 @@ func (o StreamOptions) withDefaults() StreamOptions {
 // caller should finish a stream: it exits music mode and persists the final
 // colour in one step, where setting DP 21 back to "colour" would instead
 // revert the bulb to the colour it had before the stream started.
-func (b *Bulb) StreamColours(ctx context.Context, colours <-chan device.RGB, opts StreamOptions) error {
+func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, opts StreamOptions) error {
 	opts = opts.withDefaults()
 
 	session := b.dev.Session()
@@ -99,8 +108,12 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan device.RGB, opt
 		wg.Wait()
 	}()
 
-	send := func(c device.RGB) error {
-		if err := b.dev.SetMusicColour(ctx, *opts.Transition, c.R, c.G, c.B, false); err != nil {
+	send := func(c StreamColour) error {
+		transition := *opts.Transition
+		if c.Transition != nil {
+			transition = *c.Transition
+		}
+		if err := b.dev.SetMusicColour(ctx, transition, c.RGB.R, c.RGB.G, c.RGB.B, false); err != nil {
 			return fmt.Errorf("bulb: %s: streaming colour: %w", b.Name, err)
 		}
 		return nil
@@ -110,7 +123,7 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan device.RGB, opt
 	defer ticker.Stop()
 
 	var (
-		pending  *device.RGB
+		pending  *StreamColour
 		lastSent = time.Now()
 	)
 
