@@ -249,7 +249,10 @@ for `device.Device` deliberately.
 
 `device.Device` also carries the rest of `BulbDevice`'s "sugar" surface with
 faithful signatures — the one change is `nowait bool` → `wait bool`, to match
-`Session`. Setters: `SetHSV` (h/s/v each 0-1), `SetScene`,
+`Session`. It lives in `device/sugar.go`, split from the generic DP access
+(`SetDPs`/`SetValue`/`Status`) in `device/device.go` the way its tests are
+already split (`device_test.go` + `sugar_test.go`). Setters: `SetHSV`
+(h/s/v each 0-1), `SetScene`,
 `SetWhitePercent`, `SetColourTempPercent`. Getters:
 `GetMode`/`GetBrightness`/`GetBrightnessPercent`/`GetColourTemp`/
 `GetColourTempPercent`/`ColourRGB`/`ColourHSV`. The percentage helpers
