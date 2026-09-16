@@ -12,7 +12,12 @@ cmd/notuya/main.go          CLI: on, off, color, brightness, get-color, list, sc
 cmd/notuya/scan.go          CLI: scan --update (merge scanned IPs into config.json by device_id)
 cmd/notuya/music.go         CLI: music (stdin colour streaming)
 cmd/notuya/config.go        CLI: config.json loading and last-color cache
-internal/
+cmd/notuyad/main.go         HTTP daemon: listener, forEachDevice fan-out, commandTimeout
+cmd/notuyad/server.go       HTTP daemon: routes + handlers (/on /off /color /brightness /stream /devices /color GET)
+cmd/notuyad/stream.go       HTTP daemon: chunked /stream body → multi-device bulb.StreamColours
+cmd/notuyad/config.go       HTTP daemon: config.json + last-color cache (copy of the CLI's, package main)
+cmd/notuyad/color.go        HTTP daemon: parseColor (#RRGGBB / RRGGBB / rgb() )
+pkg/
   protocol/                  Version-agnostic interface (Session)
   protocol35/                v3.5 implementation: 6699 framing, AES-GCM, session handshake
   device/                    Raw DP-centric API and DP encoding (tinytuya BulbDevice surface)
@@ -24,6 +29,7 @@ internal/
 
 ```
 cmd/notuya   → device, bulb, discovery, protocol35
+cmd/notuyad  → device, bulb, protocol35 (same library layers as the CLI, over HTTP)
 bulb         → device, protocol
 device       → protocol (the interface, never protocol35 directly)
 discovery    → protocol, protocol35 (uses EncodeFrame/DecodeFrame with the fixed discovery key)
@@ -49,17 +55,30 @@ and never expose a DP number. The CLI uses `bulb.Bulb` for the known
 commands; `device.Device` is exported so a caller can drive an arbitrary DP
 the business layer does not cover.
 
-`internal/` is the library: it talks to bulbs and knows nothing else. No
+`pkg/` is the library: it talks to bulbs and knows nothing else. No
 package under it prints, exits, reads the environment, or touches the
 filesystem — errors travel up and `cmd/notuya` decides what to show. That
 is what lets the whole streaming path be tested against an in-process fake
 device without going near the binary.
 
+These five packages lived under `internal/` originally, which made them
+unimportable outside this module. They were promoted to `pkg/` so a sibling
+module (`notuya-gui`, a native color-wheel picker) can consume the library
+in-process instead of over the HTTP daemon — importing `bulb`/`device`/
+`protocol35` directly and driving `bulb.StreamColours` itself. In dev the
+sibling wires them up with a local `replace
+github.com/averstraeten/notuya-go => ../notuya-go`, so nothing here has to
+be published or tagged. The trade-off, taken deliberately: the exported
+surface (`protocol.Session`, `device.Device`, `bulb.Bulb`, …) is now public
+API, so changing those signatures can break an external consumer — whereas
+under `internal/` the whole surface was free to churn. `discovery` moved too
+for uniformity, even though only the CLI's `scan` uses it.
+
 Everything the *file layout* implies is CLI policy and lives in
 `cmd/notuya/config.go`: where `config.json` is (the `--config` >
 `NOTUYA_CONFIG` > user-config-dir precedence), which of its keys are read,
 and the `ffffff` fallback for an absent last-colour cache. It was a package
-under `internal/` originally, which put policy at the same level as the
+under the library originally, which put policy at the same level as the
 protocol and split it from `resolveConfigPath` in `main.go`; nothing else
 ever imported it.
 
@@ -218,7 +237,7 @@ rather than reserialising the typed `Config`, so the unmodelled top-level
 keys the Python project keeps (`follow_mode`, `theme_color`, …) and any
 extra per-device fields survive untouched. A scan that matches nothing
 leaves the file byte-for-byte alone. This lives in `cmd/notuya/scan.go`
-because it is CLI policy — `internal/` never touches the filesystem. Note
+because it is CLI policy — the library never touches the filesystem. Note
 that broadcast discovery does not reach devices on every network (see the
 Discovery section), so `--update` is only as good as what the scan finds;
 a fixed IP edited by hand is always the fallback.
@@ -427,6 +446,75 @@ stuck in music mode.
 Known limitations: no reconnect if a device drops mid-stream (it is reported
 and that device stops), and colour-temperature/white-mode dragging is not
 supported — only RGB.
+
+## HTTP daemon (`cmd/notuyad`)
+
+`notuyad` is a second binary that exposes the same operations as the CLI
+over a small cross-platform HTTP API. It exists so a GUI (the GTK picker)
+can drive the bulbs without spawning a `notuya music` subprocess per drag —
+the persistent music session becomes a persistent HTTP request instead.
+
+It reuses the same library layers as the CLI (`bulb`, `device`,
+`protocol35`) and keeps the CLI's non-persistent connection model: one-shot
+endpoints open → command → close per request, and `/stream` owns a session
+only for the life of its request body. Nothing is cached between requests,
+so there is no per-request state to get wrong. `config.go`/`color.go` are
+deliberate copies of the CLI's equivalents (both live in `package main`, so
+they cannot be imported across `cmd/`); they are small and stable.
+
+### Endpoints
+
+```
+GET  /devices        list configured devices (name, ip, id)
+GET  /color          last-applied colour from the cache (hex, no '#')
+POST /on             turn all devices on
+POST /off            turn all devices off
+POST /color          body: "#RRGGBB" / "RRGGBB" / "rgb(r,g,b)" — set on all
+POST /brightness     body: "0-100" (float) — set on all
+POST /stream         chunked body of "RRGGBB [TT]" lines — stream to all
+```
+
+The write endpoints fan out to every device with `forEachDevice` (the
+daemon's copy of the CLI's concurrent, per-device-isolated pattern,
+including the `Status()` warm-up), and return `200 {"status":"ok"}` only if
+every device succeeded, `502 {"status":"error"}` otherwise — the HTTP
+equivalent of the CLI exiting non-zero on any device failure.
+
+### `/stream` is the whole point
+
+`POST /stream` is `runMusic` with the colour source swapped from `os.Stdin`
+to the request body. The body stays open for the entire drag; each
+`RRGGBB [TT]` line is broadcast to every device (newest-wins coalescing, so
+a slow bulb never stalls the reader or the others), and each device runs the
+real `bulb.StreamColours` loop over its own session. When the client closes
+the body — or the connection drops, which cancels `r.Context()` — every bulb
+is left on the final colour with a normal `SetColour` write (music mode
+exited, colour persisted), exactly as the CLI does on stdin close. A clean
+run's final colour is written to the last-colour cache so `GET /color`
+matches what is lit. `TT` (0-10) is the per-line transition, so the picker's
+transition slider still takes effect live.
+
+### Binding and discovery
+
+Binds `127.0.0.1:8765` by default (loopback, cross-platform — the earlier
+Unix-socket idea does not work reliably on Windows). Pass `--addr
+127.0.0.1:0` for an ephemeral port; either way the resolved address is
+written to `notuyad.addr` next to `config.json`, which is how a client that
+asked for `:0` discovers the real port. The picker reads
+`$NOTUYAD_ADDR` > `notuyad.addr` > the default.
+
+### Picker wiring
+
+`~/.config/tuya/picker.py`'s `BulbPool` opens one persistent chunked
+`POST /stream` request on a background thread, fed by a `queue.Queue` whose
+generator body yields each colour line and ends on a sentinel; `close()`
+enqueues the final colour then the sentinel, so the daemon leaves music mode
+with the drag's last colour. `turn_on`/`turn_off` are one-shot `POST /on`,
+`/off`. Brightness is still scaled into the RGB in Python (the stream
+protocol carries only `RRGGBB [TT]`), unchanged from the subprocess era —
+only the transport moved from stdin to HTTP, so the GTK layer above
+`BulbPool` did not change. Stdlib only (`http.client`, `queue`,
+`threading`), no new dependency.
 
 ## Working in this repo
 

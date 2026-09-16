@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/averstraeten/notuya-go/internal/protocol"
+	"github.com/averstraeten/notuya-go/pkg/protocol"
 )
 
 // mockSession captures the arguments passed to Command so tests can inspect
@@ -192,5 +192,47 @@ func TestStatusEmptyResponse(t *testing.T) {
 	}
 	if len(dps) != 0 {
 		t.Errorf("got %d dps, want 0", len(dps))
+	}
+}
+
+// TestStatusWrappedResponse verifies that Status tolerates a device wrapping
+// the JSON body with a version-header prefix and/or trailing NUL padding —
+// the "invalid character '\x00' after top-level value" failure seen on some
+// bulbs.
+func TestStatusWrappedResponse(t *testing.T) {
+	inner := []byte(`{"dps":{"20":true,"22":500}}`)
+	cases := map[string][]byte{
+		"clean":            inner,
+		"trailing NUL":     append(append([]byte(nil), inner...), 0x00, 0x00, 0x00),
+		"version prefix":   append([]byte("3.5\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"), inner...),
+		"prefix + padding": append(append([]byte("3.5\x00\x00\x00"), inner...), 0x00, 0x00),
+	}
+	for name, resp := range cases {
+		t.Run(name, func(t *testing.T) {
+			mock := &mockSession{resp: resp}
+			d := NewDevice(mock, "test")
+
+			dps, err := d.Status(context.Background())
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if string(dps["20"]) != "true" {
+				t.Errorf("dps[\"20\"] = %s, want true", dps["20"])
+			}
+			if string(dps["22"]) != "500" {
+				t.Errorf("dps[\"22\"] = %s, want 500", dps["22"])
+			}
+		})
+	}
+}
+
+// TestTrimStatusPayloadStringBraces ensures the balanced-object scan does not
+// stop at a '}' that appears inside a quoted string value.
+func TestTrimStatusPayloadStringBraces(t *testing.T) {
+	in := append([]byte(`{"dps":{"24":"ff}}00"}}`), 0x00)
+	got := trimStatusPayload(in)
+	want := `{"dps":{"24":"ff}}00"}}`
+	if string(got) != want {
+		t.Errorf("trimStatusPayload = %q, want %q", got, want)
 	}
 }

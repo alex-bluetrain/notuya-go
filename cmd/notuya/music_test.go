@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/averstraeten/notuya-go/internal/bulb"
-	"github.com/averstraeten/notuya-go/internal/device"
+	"github.com/averstraeten/notuya-go/pkg/bulb"
+	"github.com/averstraeten/notuya-go/pkg/device"
 )
 
 // TestOfferKeepsNewest is the core guarantee of the stdin broadcast: a

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/protocol"
+	"github.com/averstraeten/notuya-go/pkg/protocol"
 )
 
 // cmdStatus is the unsolicited status push a device sends on its own

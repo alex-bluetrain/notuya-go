@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/averstraeten/notuya-go/internal/discovery"
+	"github.com/averstraeten/notuya-go/pkg/discovery"
 )
 
 const scanTestConfig = `{

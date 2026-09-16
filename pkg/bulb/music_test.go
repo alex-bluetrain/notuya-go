@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/device"
-	"github.com/averstraeten/notuya-go/internal/protocol"
+	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/averstraeten/notuya-go/pkg/protocol"
 )
 
 // streamCall is one recorded Command invocation.

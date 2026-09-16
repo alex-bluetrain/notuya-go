@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/protocol"
+	"github.com/averstraeten/notuya-go/pkg/protocol"
 )
 
 // DP ids for the known target hardware (Tuya bulb "type B" / hsv16 colour
@@ -84,6 +84,7 @@ func (d *Device) Status(ctx context.Context) (map[string]json.RawMessage, error)
 	if err != nil {
 		return nil, fmt.Errorf("device: status query: %w", err)
 	}
+	payload = trimStatusPayload(payload)
 	if len(payload) == 0 {
 		return map[string]json.RawMessage{}, nil
 	}
@@ -92,6 +93,55 @@ func (d *Device) Status(ctx context.Context) (map[string]json.RawMessage, error)
 		return nil, fmt.Errorf("device: parsing status response: %w", err)
 	}
 	return resp.DPS, nil
+}
+
+// trimStatusPayload isolates the JSON object in a status response. Some
+// devices wrap the body: a version-header prefix ahead of the opening '{'
+// and/or trailing padding (NUL bytes) after the closing '}'. json.Unmarshal
+// rejects both ("invalid character '\x00' after top-level value"), so we
+// slice out the balanced top-level object, honouring quoted strings and
+// escapes, and drop everything around it. If no '{' is found the input is
+// returned unchanged so the caller's own error surfaces.
+func trimStatusPayload(payload []byte) []byte {
+	start := -1
+	for i, b := range payload {
+		if b == '{' {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return payload
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(payload); i++ {
+		c := payload[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return payload[start : i+1]
+			}
+		}
+	}
+	return payload[start:]
 }
 
 // SetDPs sends a CONTROL_NEW "set these dps" request (a partial update —

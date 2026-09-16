@@ -5,3 +5,6 @@ last-color.txt
 
 # Local agent working files (plans, session state).
 .mastracode/
+
+# compiled binaries
+notuyad

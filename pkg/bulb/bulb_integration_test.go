@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/protocol35"
+	"github.com/averstraeten/notuya-go/pkg/protocol35"
 )
 
 // TestBulbAgainstRealDevice exercises the full business control surface

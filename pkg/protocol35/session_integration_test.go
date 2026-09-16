@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/protocol"
+	"github.com/averstraeten/notuya-go/pkg/protocol"
 )
 
 // TestSessionOpenAgainstRealDevice is the other half of M1's "done"

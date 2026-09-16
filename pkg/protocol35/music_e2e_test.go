@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/bulb"
-	"github.com/averstraeten/notuya-go/internal/device"
-	"github.com/averstraeten/notuya-go/internal/protocol"
+	"github.com/averstraeten/notuya-go/pkg/bulb"
+	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/averstraeten/notuya-go/pkg/protocol"
 )
 
 // TestStreamColoursEndToEnd runs the real device.StreamColours loop over a

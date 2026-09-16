@@ -11,9 +11,9 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/averstraeten/notuya-go/internal/bulb"
-	"github.com/averstraeten/notuya-go/internal/device"
-	"github.com/averstraeten/notuya-go/internal/protocol35"
+	"github.com/averstraeten/notuya-go/pkg/bulb"
+	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/averstraeten/notuya-go/pkg/protocol35"
 )
 
 // runMusic streams colours read from stdin (one RRGGBB per line) to every

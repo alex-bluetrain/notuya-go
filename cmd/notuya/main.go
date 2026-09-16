@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/averstraeten/notuya-go/internal/bulb"
-	"github.com/averstraeten/notuya-go/internal/device"
-	"github.com/averstraeten/notuya-go/internal/discovery"
-	"github.com/averstraeten/notuya-go/internal/protocol35"
+	"github.com/averstraeten/notuya-go/pkg/bulb"
+	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/averstraeten/notuya-go/pkg/discovery"
+	"github.com/averstraeten/notuya-go/pkg/protocol35"
 )
 
 const usage = `Usage:
