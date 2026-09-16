@@ -1,5 +1,6 @@
 // Package bulb is the high-level business surface for one Tuya bulb —
-// TurnOn, TurnOff, SetColour, SetBrightnessPercent, Status, and the
+// TurnOn, TurnOff, SetColour, SetColourBrightness, SetWhiteBrightness,
+// Status, and the
 // music-mode colour streaming loop. It is built on top of device.Device
 // (the low-level, DP-centric layer), the way the sibling Python project's
 // ctl.py / picker.py drive tinytuya's BulbDevice. Callers that need a DP

@@ -126,16 +126,15 @@ func (d *Device) SetWhite(ctx context.Context, brightness, temp int, wait bool) 
 	}, wait)
 }
 
-// SetBrightnessPercent sets brightness as a 0-100 percentage, mirroring
-// tinytuya's set_brightness_percentage. It is mode-dependent rather than a
-// single flat DP write: it reads the device's current mode+colour first,
-// and
-//   - in colour mode, keeps the current hue/saturation and only changes the
-//     "v" component of DP 24 (so an in-progress colour is preserved),
-//   - otherwise, falls back to a plain white-mode brightness write on DP 22
-//     (colour temperature is left untouched — the device keeps its prior
-//     value for any DP not present in a CONTROL_NEW write).
-func (d *Device) SetBrightnessPercent(ctx context.Context, pct float64, wait bool) error {
+// SetColourBrightness adjusts the brightness of the current colour without
+// changing hue or saturation, as a 0-100 percentage. On this hardware
+// brightness in colour mode is not a separate DP: it is the "v" component of
+// the colour value in DP 24 (hhhhssssvvvv). This reads the current colour,
+// rewrites it with the new v, and never touches DPMode — so it only makes
+// sense while the bulb is already in colour mode. It errors if DP 24 is
+// missing or unparseable (there is no colour to preserve); it never falls
+// back to a white-mode write.
+func (d *Device) SetColourBrightness(ctx context.Context, pct float64, wait bool) error {
 	if pct < 0 || pct > 100 {
 		return fmt.Errorf("device: brightness percent must be 0-100, got %g", pct)
 	}
@@ -143,29 +142,33 @@ func (d *Device) SetBrightnessPercent(ctx context.Context, pct float64, wait boo
 
 	dps, err := d.Status(ctx)
 	if err != nil {
-		return fmt.Errorf("device: reading current state for brightness: %w", err)
+		return fmt.Errorf("device: reading current colour for brightness: %w", err)
 	}
-
-	mode := ModeWhite
-	if raw, ok := dps[DPMode]; ok {
-		_ = json.Unmarshal(raw, &mode)
+	raw, ok := dps[DPColour]
+	if !ok {
+		return fmt.Errorf("device: DP %s not present; cannot set colour brightness", DPColour)
 	}
-
-	if mode == ModeColour {
-		if raw, ok := dps[DPColour]; ok {
-			var hex string
-			if err := json.Unmarshal(raw, &hex); err == nil {
-				if h, s, _, err := parseHSV16Hex(hex); err == nil {
-					return d.SetValue(ctx, DPColour, hsv16Hex(h, s, value), wait)
-				}
-			}
-		}
+	var hex string
+	if err := json.Unmarshal(raw, &hex); err != nil {
+		return fmt.Errorf("device: DP %s is not a string: %w", DPColour, err)
 	}
+	h, s, _, err := parseHSV16Hex(hex)
+	if err != nil {
+		return fmt.Errorf("device: parsing current colour: %w", err)
+	}
+	return d.SetValue(ctx, DPColour, hsv16Hex(h, s, value), wait)
+}
 
-	return d.SetDPs(ctx, map[string]any{
-		DPMode:       ModeWhite,
-		DPBrightness: value,
-	}, wait)
+// SetWhiteBrightness sets white-mode brightness as a 0-100 percentage,
+// switching the bulb to white mode (DP 21) and writing DP 22. Colour
+// temperature is left untouched (the device keeps its prior value for any DP
+// not present in a CONTROL_NEW write). This is an alias of SetBrightness's
+// percentage form and is unconditional — no state is read.
+func (d *Device) SetWhiteBrightness(ctx context.Context, pct float64, wait bool) error {
+	if pct < 0 || pct > 100 {
+		return fmt.Errorf("device: brightness percent must be 0-100, got %g", pct)
+	}
+	return d.SetBrightness(ctx, int(BrightnessMax*pct/100), wait)
 }
 
 // SetMusicColour writes one DP 28 music-mode colour with the given per-update

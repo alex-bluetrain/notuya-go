@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/averstraeten/notuya-go/pkg/bulb"
+	"github.com/averstraeten/notuya-go/pkg/device"
 )
 
 // server holds the daemon's configuration. It keeps no per-request state:
@@ -98,7 +99,14 @@ func (s *server) handleBrightness(w http.ResponseWriter, r *http.Request) {
 		if err := b.TurnOn(ctx); err != nil {
 			return err
 		}
-		return b.SetBrightnessPercent(ctx, pct)
+		mode, err := b.Raw().GetMode(ctx)
+		if err != nil {
+			return err
+		}
+		if mode == device.ModeColour {
+			return b.SetColourBrightness(ctx, pct)
+		}
+		return b.SetWhiteBrightness(ctx, pct)
 	})
 	writeResult(w, ok)
 }

@@ -50,7 +50,7 @@ The split mirrors tinytuya: `device.Device` is the raw, DP-centric layer
 `wait bool` and speaking DP numbers), the equivalent of `BulbDevice`.
 `bulb.Bulb` is the business layer built *on top*
 of `*device.Device`: its domain methods (`TurnOn`, `SetColour`,
-`SetBrightnessPercent`, `StreamColours`) always use `wait=true` internally
+`SetColourBrightness`, `SetWhiteBrightness`, `StreamColours`) always use `wait=true` internally
 and never expose a DP number. The CLI uses `bulb.Bulb` for the known
 commands; `device.Device` is exported so a caller can drive an arbitrary DP
 the business layer does not cover.
@@ -326,7 +326,7 @@ Two deliberate departures from tinytuya's exact behaviour here:
   nobody has written. It is the first cut to make when 3.1/3.3 lands.
 - `max_simultaneous_dps` (`Device.py:141-153`): when a multi-DP `CONTROL`
   comes back `Err`, tinytuya retries one DP at a time and permanently lowers
-  its limit. `SetColour` sends DP 21+24 together and `SetBrightnessPercent`
+  its limit. `SetColour` sends DP 21+24 together and `SetWhiteBrightness`
   DP 21+22; the A60TY10W accepts both. Adaptive state for hardware that is
   not on this LAN is not worth carrying, but this is the likeliest thing to
   break on a different model — the symptom is a set that returns an error
@@ -384,7 +384,7 @@ neither `device` nor `bulb` imports `protocol35`.
   has no CLI consumer yet; this test is what keeps that deliberate public
   surface exercised.
 - `bulb/bulb_integration_test.go`: the full business surface
-  (`Status`, `TurnOn`, `SetColour`, `SetBrightnessPercent`, `TurnOff`)
+  (`Status`, `TurnOn`, `SetColour`, `SetColourBrightness`, `TurnOff`)
   against real hardware, gated behind `NOTUYA_INTEGRATION`.
 
 Run the streaming tests with `-race`: they are the only concurrent paths in

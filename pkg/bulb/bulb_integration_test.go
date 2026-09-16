@@ -10,7 +10,7 @@ import (
 )
 
 // TestBulbAgainstRealDevice exercises the full business control surface
-// (Status, TurnOn, SetColour, SetBrightnessPercent, TurnOff) against real
+// (Status, TurnOn, SetColour, SetColourBrightness, TurnOff) against real
 // hardware. Hermetic by default; opt in with NOTUYA_INTEGRATION=1 plus
 // NOTUYA_TEST_IP/NOTUYA_TEST_KEY.
 func TestBulbAgainstRealDevice(t *testing.T) {
@@ -47,8 +47,8 @@ func TestBulbAgainstRealDevice(t *testing.T) {
 	t.Run("SetColour red", func(t *testing.T) {
 		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, 255, 0, 0) })
 	})
-	t.Run("SetBrightnessPercent 30", func(t *testing.T) {
-		run(t, func(ctx context.Context, b *Bulb) error { return b.SetBrightnessPercent(ctx, 30) })
+	t.Run("SetColourBrightness 30", func(t *testing.T) {
+		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColourBrightness(ctx, 30) })
 	})
 	t.Run("SetColour green", func(t *testing.T) {
 		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, 0, 255, 0) })

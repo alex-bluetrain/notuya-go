@@ -158,7 +158,14 @@ func main() {
 			if err := b.TurnOn(ctx); err != nil {
 				return err
 			}
-			return b.SetBrightnessPercent(ctx, float64(pct))
+			mode, err := b.Raw().GetMode(ctx)
+			if err != nil {
+				return err
+			}
+			if mode == device.ModeColour {
+				return b.SetColourBrightness(ctx, float64(pct))
+			}
+			return b.SetWhiteBrightness(ctx, float64(pct))
 		})
 	case "music":
 		if *transition < 0 || *transition > device.MaxTransition {
