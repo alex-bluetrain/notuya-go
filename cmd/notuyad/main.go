@@ -1,43 +1,43 @@
-// Command notuyad is an HTTP daemon for controlling Tuya local-protocol
-// v3.5 bulbs. It exposes the same operations as the notuya CLI over a small
-// cross-platform HTTP API, plus a chunked-body /stream endpoint whose
-// request body carries a live colour stream (RRGGBB [TT] lines) for the
-// duration of a colour-picker drag — the equivalent of piping colours into
-// `notuya music`, without spawning a subprocess.
+// Command notuyad is the HTTP/WebSocket backend for the notuya mobile app.
+// It exposes the full per-device feature set of the notuya GUI — power,
+// colour, brightness, colour temperature, live colour drag, rooms, scenes,
+// discovery and config editing — over a resourceful JSON API keyed by
+// device_id, with a WebSocket transport for the live colour drag.
 //
-// It binds loopback by default and keeps no persistent bulb sessions
-// between requests: one-shot endpoints open/command/close per request, and
-// /stream owns a session only for the life of its body, mirroring the CLI.
+// The daemon owns all Tuya protocol work: it keeps one persistent per-device
+// session (see pkg/control) and the mobile client only ever speaks HTTP/JSON
+// and WebSocket to it. It binds the LAN with no authentication (trusted LAN
+// only) and advertises itself over mDNS as _notuyad._tcp so the app can find
+// it without a typed URL.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"sync"
+	"syscall"
 	"time"
 
 	"github.com/averstraeten/notuya-go/pkg/bulb"
+	"github.com/averstraeten/notuya-go/pkg/control"
 	"github.com/averstraeten/notuya-go/pkg/device"
-	"github.com/averstraeten/notuya-go/pkg/protocol35"
 )
-
-// commandTimeout bounds one device's whole open→command→close cycle. A var
-// so tests can shorten it; nothing at runtime reassigns it.
-var commandTimeout = 10 * time.Second
 
 func logf(format string, args ...any) { log.Printf(format, args...) }
 
 func main() {
 	configPath := flag.String("config", "", "path to config.json (default: $NOTUYA_CONFIG, or the user config dir)")
-	addr := flag.String("addr", "127.0.0.1:8765", "address to listen on (use 127.0.0.1:0 for an ephemeral port)")
+	addr := flag.String("addr", "0.0.0.0:8765", "address to listen on (use 0.0.0.0:0 for an ephemeral port)")
 	transition := flag.Int("transition", device.DefaultTransition, "stream: default per-update fade length, 0-10")
 	interval := flag.Duration("interval", bulb.DefaultStreamInterval, "stream: minimum spacing between colour updates")
+	mdns := flag.Bool("mdns", true, "advertise the daemon over mDNS as _notuyad._tcp")
 	flag.Parse()
 
 	if *transition < 0 || *transition > device.MaxTransition {
@@ -46,85 +46,64 @@ func main() {
 	}
 
 	path := resolveConfigPath(*configPath)
-	cfg, err := loadConfig(path)
+	cfg, err := control.LoadConfig(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if len(cfg.Devices) == 0 {
-		fmt.Fprintln(os.Stderr, "no devices configured in", path)
-		os.Exit(1)
-	}
 
+	streamOpts := bulb.StreamOptions{Interval: *interval, Transition: transition}
 	srv := &server{
-		devices:       cfg.Devices,
+		configPath:    path,
 		lastColorPath: filepath.Join(filepath.Dir(path), "last-color.txt"),
-		streamOpts:    bulb.StreamOptions{Interval: *interval, Transition: transition},
+		streamOpts:    streamOpts,
+		registry:      control.NewRegistry(cfg.Devices, streamOpts),
+		rooms:         cfg.Rooms,
+		scenes:        cfg.Scenes,
+		devices:       cfg.Devices,
 	}
+	defer srv.registry.CloseAll()
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)
 	}
+	port := ln.Addr().(*net.TCPAddr).Port
 
 	// Announce the resolved address next to config, so a client that asked
-	// for an ephemeral port (127.0.0.1:0) can discover the real one.
+	// for an ephemeral port can discover the real one.
 	addrFile := filepath.Join(filepath.Dir(path), "notuyad.addr")
 	if err := os.WriteFile(addrFile, []byte(ln.Addr().String()), 0o644); err != nil {
 		logf("warning: could not write %s: %v", addrFile, err)
 	}
 	defer os.Remove(addrFile)
 
-	log.Printf("notuyad listening on http://%s (%d device(s))", ln.Addr(), len(cfg.Devices))
-	if err := http.Serve(ln, srv.routes()); err != nil {
-		fmt.Fprintln(os.Stderr, "serve:", err)
-		os.Exit(1)
+	if *mdns {
+		shutdown, err := advertiseMDNS(port)
+		if err != nil {
+			logf("warning: mDNS advertisement failed: %v", err)
+		} else {
+			defer shutdown()
+		}
 	}
-}
 
-// forEachDevice fans out fn to every device concurrently, isolating
-// failures per device — mirrors the CLI's forEachDevice, including the
-// Status() connectivity warm-up before the real command. It returns whether
-// every device succeeded.
-func (s *server) forEachDevice(ctx context.Context, fn func(context.Context, *bulb.Bulb) error) bool {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	failed := 0
+	httpSrv := &http.Server{Handler: srv.routes()}
 
-	for _, d := range s.devices {
-		wg.Add(1)
-		go func(d Device) {
-			defer wg.Done()
-			cctx, cancel := context.WithTimeout(ctx, commandTimeout)
-			defer cancel()
+	go func() {
+		log.Printf("notuyad listening on http://%s (%d device(s))", ln.Addr(), len(cfg.Devices))
+		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintln(os.Stderr, "serve:", err)
+			os.Exit(1)
+		}
+	}()
 
-			sess := protocol35.NewSession(d.IPAddress, []byte(d.LocalKey))
-			if err := sess.Open(cctx); err != nil {
-				mu.Lock()
-				failed++
-				mu.Unlock()
-				logf("FAIL %s: %v", d.name(), err)
-				return
-			}
-			defer sess.Close()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
 
-			b := bulb.NewBulb(sess, d.name())
-			if err := b.Status(cctx); err != nil {
-				mu.Lock()
-				failed++
-				mu.Unlock()
-				logf("FAIL %s: %v", d.name(), err)
-				return
-			}
-			if err := fn(cctx, b); err != nil {
-				mu.Lock()
-				failed++
-				mu.Unlock()
-				logf("FAIL %s: %v", d.name(), err)
-			}
-		}(d)
-	}
-	wg.Wait()
-	return failed == 0
+	log.Println("notuyad shutting down")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpSrv.Shutdown(ctx)
 }

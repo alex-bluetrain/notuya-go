@@ -12,24 +12,27 @@ cmd/notuya/main.go          CLI: on, off, color, brightness, get-color, list, sc
 cmd/notuya/scan.go          CLI: scan --update (merge scanned IPs into config.json by device_id)
 cmd/notuya/music.go         CLI: music (stdin colour streaming)
 cmd/notuya/config.go        CLI: config.json loading and last-color cache
-cmd/notuyad/main.go         HTTP daemon: listener, forEachDevice fan-out, commandTimeout
-cmd/notuyad/server.go       HTTP daemon: routes + handlers (/on /off /color /brightness /stream /devices /color GET)
-cmd/notuyad/stream.go       HTTP daemon: chunked /stream body → multi-device bulb.StreamColours
-cmd/notuyad/config.go       HTTP daemon: config.json + last-color cache (copy of the CLI's, package main)
-cmd/notuyad/color.go        HTTP daemon: parseColor (#RRGGBB / RRGGBB / rgb() )
+cmd/notuyad/main.go         HTTP daemon: listener, graceful shutdown, mDNS, wiring
+cmd/notuyad/server.go       HTTP daemon: resourceful routes + handlers (devices/rooms/scenes/config/discover), CORS
+cmd/notuyad/stream.go       HTTP daemon: WebSocket live colour drag (per-device + per-room)
+cmd/notuyad/discovery.go    HTTP daemon: POST /discover → Tuya LAN UDP scan
+cmd/notuyad/mdns.go         HTTP daemon: advertise _notuyad._tcp over mDNS
+cmd/notuyad/config.go       HTTP daemon: config path resolution + last-color cache (package main)
 pkg/
   protocol/                  Version-agnostic interface (Session)
   protocol35/                v3.5 implementation: 6699 framing, AES-GCM, session handshake
   device/                    Raw DP-centric API and DP encoding (tinytuya BulbDevice surface)
   bulb/                      Business layer: Bulb domain methods + music streaming
   discovery/                 UDP scanner (ports 6667/7000)
+  control/                   Per-device session control, config/rooms/scenes model, live streamer, registry
 ```
 
 ### Dependency flow
 
 ```
 cmd/notuya   → device, bulb, discovery, protocol35
-cmd/notuyad  → device, bulb, protocol35 (same library layers as the CLI, over HTTP)
+cmd/notuyad  → control, device, bulb, discovery, protocol35 (per-device HTTP/WS backend)
+control      → bulb, device, protocol35
 bulb         → device, protocol
 device       → protocol (the interface, never protocol35 directly)
 discovery    → protocol, protocol35 (uses EncodeFrame/DecodeFrame with the fixed discovery key)
@@ -449,72 +452,73 @@ supported — only RGB.
 
 ## HTTP daemon (`cmd/notuyad`)
 
-`notuyad` is a second binary that exposes the same operations as the CLI
-over a small cross-platform HTTP API. It exists so a GUI (the GTK picker)
-can drive the bulbs without spawning a `notuya music` subprocess per drag —
-the persistent music session becomes a persistent HTTP request instead.
+`notuyad` is the HTTP/WebSocket backend for the `notuya-mobile` app. It
+exposes the full per-device feature set of the GUI — power, colour,
+brightness, colour temperature, live colour drag, rooms, scenes, discovery
+and config editing — over a resourceful JSON API keyed by `device_id`. The
+daemon owns all Tuya protocol work; the mobile client only ever speaks
+HTTP/JSON and WebSocket to it.
 
-It reuses the same library layers as the CLI (`bulb`, `device`,
-`protocol35`) and keeps the CLI's non-persistent connection model: one-shot
-endpoints open → command → close per request, and `/stream` owns a session
-only for the life of its request body. Nothing is cached between requests,
-so there is no per-request state to get wrong. `config.go`/`color.go` are
-deliberate copies of the CLI's equivalents (both live in `package main`, so
-they cannot be imported across `cmd/`); they are small and stable.
+Unlike the old broadcast appliance, the daemon keeps **one persistent
+per-device session** (`pkg/control.Control`): every command serializes
+behind a per-device mutex, and a live colour drag borrows a short-lived
+music-mode streamer. The device layer is a `pkg/control.Registry` keyed by
+`device_id`; rooms/scenes resolve to member controls and fan out.
 
 ### Endpoints
 
 ```
-GET  /devices        list configured devices (name, ip, id)
-GET  /color          last-applied colour from the cache (hex, no '#')
-POST /on             turn all devices on
-POST /off            turn all devices off
-POST /color          body: "#RRGGBB" / "RRGGBB" / "rgb(r,g,b)" — set on all
-POST /brightness     body: "0-100" (float) — set on all
-POST /stream         chunked body of "RRGGBB [TT]" lines — stream to all
+Devices / control (target one device by id):
+GET  /devices                    list devices ({device_id, name, ip_address, room?})
+GET  /devices/{id}               parsed status ({on, mode, bright_pct, temp_pct, hue, sat, has_colour, has_temp})
+POST /devices/{id}/power         {on: bool}
+POST /devices/{id}/color         {r,g,b} or {hue,sat[,bright]}
+POST /devices/{id}/brightness    {pct}  (colour-v aware)
+POST /devices/{id}/temperature   {pct}  (white mode)
+WS   /devices/{id}/stream        live drag; text frames "RRGGBB [TT]"
+
+Rooms:
+GET  /rooms                      resolved groups (incl. synthetic "No room")
+POST /rooms/{name}/power         {on}  (fan-out)
+WS   /rooms/{name}/stream        live drag; fan-out
+
+Scenes:
+GET  /scenes
+POST /scenes/{name}/apply        fan-out discrete commands, best-effort
+POST /scenes/{name}/capture      build states from current live status, persist
+DELETE /scenes/{name}
+
+Discovery / config:
+POST /discover                   {timeout_ms} → [{id, ip, version}]  (Tuya LAN UDP scan)
+GET  /config/devices             the devices array
+PUT  /config/devices             replace the devices array, persist, rebuild registry
 ```
 
-The write endpoints fan out to every device with `forEachDevice` (the
-daemon's copy of the CLI's concurrent, per-device-isolated pattern,
-including the `Status()` warm-up), and return `200 {"status":"ok"}` only if
-every device succeeded, `502 {"status":"error"}` otherwise — the HTTP
-equivalent of the CLI exiting non-zero on any device failure.
+Discrete write endpoints return `200 {"ok":true}` on success, `502
+{"ok":false}` when a device command failed, `404` for an unknown
+device/room/scene, `400` for a bad body. CORS is permissive (any origin) —
+trusted LAN only, **no authentication**.
 
-### `/stream` is the whole point
+### Live colour drag over WebSocket
 
-`POST /stream` is `runMusic` with the colour source swapped from `os.Stdin`
-to the request body. The body stays open for the entire drag; each
-`RRGGBB [TT]` line is broadcast to every device (newest-wins coalescing, so
-a slow bulb never stalls the reader or the others), and each device runs the
-real `bulb.StreamColours` loop over its own session. When the client closes
-the body — or the connection drops, which cancels `r.Context()` — every bulb
-is left on the final colour with a normal `SetColour` write (music mode
-exited, colour persisted), exactly as the CLI does on stdin close. A clean
-run's final colour is written to the last-colour cache so `GET /color`
-matches what is lit. `TT` (0-10) is the per-line transition, so the picker's
-transition slider still takes effect live.
+`WS /devices/{id}/stream` (and `/rooms/{name}/stream`) replaces the old
+chunked `POST /stream` — React Native's `fetch` can't reliably stream a
+request body, so the drag moved to a WebSocket. The client sends text frames
+`"RRGGBB [TT]"` during the drag; each frame feeds the device's music-mode
+streamer (newest-wins, so a phone flooding frames never stalls the bulb).
+When the socket closes cleanly the bulb is left on the last streamed colour
+with a normal `SetColour` write (music mode exited, colour persisted), and
+that colour is saved to the last-colour cache. `TT` (0-10) is the per-frame
+transition.
 
 ### Binding and discovery
 
-Binds `127.0.0.1:8765` by default (loopback, cross-platform — the earlier
-Unix-socket idea does not work reliably on Windows). Pass `--addr
-127.0.0.1:0` for an ephemeral port; either way the resolved address is
-written to `notuyad.addr` next to `config.json`, which is how a client that
-asked for `:0` discovers the real port. The picker reads
-`$NOTUYAD_ADDR` > `notuyad.addr` > the default.
-
-### Picker wiring
-
-`~/.config/tuya/picker.py`'s `BulbPool` opens one persistent chunked
-`POST /stream` request on a background thread, fed by a `queue.Queue` whose
-generator body yields each colour line and ends on a sentinel; `close()`
-enqueues the final colour then the sentinel, so the daemon leaves music mode
-with the drag's last colour. `turn_on`/`turn_off` are one-shot `POST /on`,
-`/off`. Brightness is still scaled into the RGB in Python (the stream
-protocol carries only `RRGGBB [TT]`), unchanged from the subprocess era —
-only the transport moved from stdin to HTTP, so the GTK layer above
-`BulbPool` did not change. Stdlib only (`http.client`, `queue`,
-`threading`), no new dependency.
+Binds `0.0.0.0:8765` by default so the phone can reach it. Pass `--addr
+0.0.0.0:0` for an ephemeral port; the resolved address is still written to
+`notuyad.addr` next to `config.json`. The daemon advertises itself over
+**mDNS** as `_notuyad._tcp` (`--mdns`, on by default) so the app can browse
+for it without a typed URL; it deregisters on shutdown. `SIGINT`/`SIGTERM`
+trigger a graceful `http.Server.Shutdown` and close every device session.
 
 ## Working in this repo
 
