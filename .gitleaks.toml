@@ -1,0 +1,12 @@
+title = "notuya-go gitleaks config"
+
+# Use gitleaks' default rule set, only add local exceptions below.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-fake fixtures: captured/synthetic Tuya local_keys and session material used only in tests, never live device credentials."
+paths = [
+  '''testdata/.*''',
+  '''_test\.go$''',
+]
