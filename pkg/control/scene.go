@@ -1,6 +1,6 @@
 package control
 
-import "github.com/averstraeten/notuya-go/pkg/device"
+import "github.com/alex-bluetrain/notuya-go/pkg/device"
 
 // StateFromStatus maps a refreshed Status to a SceneState. An off light stores
 // only device_id + on; an on light stores its mode plus the data that mode

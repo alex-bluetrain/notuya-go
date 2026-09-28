@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/averstraeten/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
 )
 
 var (

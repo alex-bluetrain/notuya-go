@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/averstraeten/notuya-go/pkg/bulb"
-	"github.com/averstraeten/notuya-go/pkg/control"
-	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/alex-bluetrain/notuya-go/pkg/bulb"
+	"github.com/alex-bluetrain/notuya-go/pkg/control"
+	"github.com/alex-bluetrain/notuya-go/pkg/device"
 )
 
 // server holds the daemon's shared state. The device registry owns the

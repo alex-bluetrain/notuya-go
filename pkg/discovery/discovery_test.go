@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/averstraeten/notuya-go/pkg/protocol"
-	"github.com/averstraeten/notuya-go/pkg/protocol35"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol35"
 )
 
 // TestDiscoveryFrameRoundTrip is a network-independent sanity check for

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/averstraeten/notuya-go/pkg/bulb"
-	"github.com/averstraeten/notuya-go/pkg/device"
-	"github.com/averstraeten/notuya-go/pkg/protocol35"
+	"github.com/alex-bluetrain/notuya-go/pkg/bulb"
+	"github.com/alex-bluetrain/notuya-go/pkg/device"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol35"
 )
 
 // Control owns one persistent protocol35 session for a single device and

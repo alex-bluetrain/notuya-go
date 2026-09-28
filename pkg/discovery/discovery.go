@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/averstraeten/notuya-go/pkg/protocol"
-	"github.com/averstraeten/notuya-go/pkg/protocol35"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol35"
 )
 
 const (

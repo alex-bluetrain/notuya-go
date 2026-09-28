@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/averstraeten/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
 )
 
 // DP ids for the known target hardware (Tuya bulb "type B" / hsv16 colour

@@ -3,8 +3,8 @@ package bulb
 import (
 	"context"
 
-	"github.com/averstraeten/notuya-go/pkg/device"
-	"github.com/averstraeten/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/device"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
 )
 
 // Bulb is the high-level control surface for one Tuya bulb. Its commands

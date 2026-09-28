@@ -70,7 +70,7 @@ module (`notuya-gui`, a native color-wheel picker) can consume the library
 in-process instead of over the HTTP daemon — importing `bulb`/`device`/
 `protocol35` directly and driving `bulb.StreamColours` itself. In dev the
 sibling wires them up with a local `replace
-github.com/averstraeten/notuya-go => ../notuya-go`, so nothing here has to
+github.com/alex-bluetrain/notuya-go => ../notuya-go`, so nothing here has to
 be published or tagged. The trade-off, taken deliberately: the exported
 surface (`protocol.Session`, `device.Device`, `bulb.Bulb`, …) is now public
 API, so changing those signatures can break an external consumer — whereas
@@ -247,7 +247,7 @@ a fixed IP edited by hand is always the fallback.
 
 ## Code conventions
 
-- **Go 1.23**, module `github.com/averstraeten/notuya-go`.
+- **Go 1.23**, module `github.com/alex-bluetrain/notuya-go`.
 - **Zero external dependencies** — everything with the stdlib (`crypto/aes`, `crypto/cipher`, `crypto/hmac`, `crypto/sha256`, `crypto/md5`, `encoding/binary`, `encoding/json`).
 - Every CLI operation is open → handshake → command(s) → close (non-persistent connections). `music` is the exception: one session per device for the whole run.
 - Concurrent fan-out to all devices with `sync.WaitGroup`, per-device error isolation.

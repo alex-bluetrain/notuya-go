@@ -25,9 +25,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/averstraeten/notuya-go/pkg/bulb"
-	"github.com/averstraeten/notuya-go/pkg/control"
-	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/alex-bluetrain/notuya-go/pkg/bulb"
+	"github.com/alex-bluetrain/notuya-go/pkg/control"
+	"github.com/alex-bluetrain/notuya-go/pkg/device"
 )
 
 func logf(format string, args ...any) { log.Printf(format, args...) }

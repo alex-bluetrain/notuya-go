@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/averstraeten/notuya-go/pkg/discovery"
+	"github.com/alex-bluetrain/notuya-go/pkg/discovery"
 )
 
 // updateConfigIPs rewrites the ip_address of every device in the config file

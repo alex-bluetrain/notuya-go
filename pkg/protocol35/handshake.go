@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/averstraeten/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
 )
 
 // generateNonce returns a fresh random 16-byte nonce for a handshake.

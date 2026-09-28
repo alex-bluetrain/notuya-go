@@ -9,8 +9,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/averstraeten/notuya-go/pkg/control"
-	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/alex-bluetrain/notuya-go/pkg/control"
+	"github.com/alex-bluetrain/notuya-go/pkg/device"
 )
 
 // handleDeviceStream is the WebSocket live colour drag for one device. The

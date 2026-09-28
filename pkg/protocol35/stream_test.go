@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/averstraeten/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
 )
 
 var testLocalKey = []byte("0123456789abcdef")

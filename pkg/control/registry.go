@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/averstraeten/notuya-go/pkg/bulb"
-	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/alex-bluetrain/notuya-go/pkg/bulb"
+	"github.com/alex-bluetrain/notuya-go/pkg/device"
 )
 
 // Registry owns one Control per configured device, keyed by device_id. It is

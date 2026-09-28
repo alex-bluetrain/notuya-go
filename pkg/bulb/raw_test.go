@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/averstraeten/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
 )
 
 // TestRawExposesUnderlyingDevice verifies Raw() returns the Bulb's own

@@ -3,7 +3,7 @@ package control
 import (
 	"encoding/json"
 
-	"github.com/averstraeten/notuya-go/pkg/device"
+	"github.com/alex-bluetrain/notuya-go/pkg/device"
 )
 
 // Status is the parsed snapshot rendered per device, derived from one
