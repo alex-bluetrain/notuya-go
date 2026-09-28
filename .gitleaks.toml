@@ -4,9 +4,21 @@ title = "notuya-go gitleaks config"
 [extend]
 useDefault = true
 
+# Deliberately narrow. An earlier version of this file allowlisted all of
+# testdata/ and *_test.go wholesale, which would have hidden a genuine
+# device credential that had been committed there. Instead of trusting a
+# path, only the specific fabricated placeholder values are permitted — so
+# any *real* Tuya local_key (high entropy, not matching these) still trips
+# the scanner wherever it appears, tests included.
 [allowlist]
-description = "Known-fake fixtures: captured/synthetic Tuya local_keys and session material used only in tests, never live device credentials."
-paths = [
-  '''testdata/.*''',
-  '''_test\.go$''',
+description = "Fabricated placeholder credentials used by tests and fixtures."
+regexes = [
+  '''fake-local-key(16|-2)''',
+  '''ebfake[0-9]+''',
+  '''0123456789abcdef''',
+  '''key1234567890123''',
+  '''keyA''',
+  # Session key deterministically derived from fake-local-key16 by the
+  # handshake fixture; regenerate with scripts/rederive-handshake-fixture.py.
+  '''ab81531ec4e9cd3227e1bf2e7fe7a8b0''',
 ]
