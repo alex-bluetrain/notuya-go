@@ -3,7 +3,9 @@
   "packages": {
     ".": {
       "release-type": "go",
-      "package-name": "notuya-go"
+      "package-name": "notuya-go",
+      "// include-component-in-tag": "Go's module proxy only resolves root-module tags shaped vX.Y.Z, so the component name must stay out of the tag.",
+      "include-component-in-tag": false
     }
   }
 }
