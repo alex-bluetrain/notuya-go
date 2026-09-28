@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - master
+  # Allows re-running the release check by hand, e.g. after fixing repo
+  # settings or when a release PR was closed and needs recreating.
+  workflow_dispatch:
 
 permissions:
   contents: write
