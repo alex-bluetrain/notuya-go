@@ -26,7 +26,7 @@ const usage = `Usage:
   notuya color RRGGBB
   notuya brightness 0-100
   notuya music            (streams RRGGBB colors read from stdin, one per line)
-                          [--transition 0-10] [--interval 40ms]
+                          [--transition 0-1] [--interval 40ms]
   notuya get-color
   notuya list
   notuya scan             [--update: rewrite config.json IPs, matched by device_id]

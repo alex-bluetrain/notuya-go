@@ -3,15 +3,17 @@ package device
 import "fmt"
 
 const (
-	// DefaultTransition is the fade length sent with each music colour: 0
-	// is instant but visibly steppy, higher values smear; 1 is the value
-	// the Python picker settled on.
+	// DefaultTransition is the change mode sent with each music colour.
+	// Per Tuya's DP 28 (music_data) spec the leading digit is a change-mode
+	// flag, not a magnitude: 0 = direct output (jump), 1 = gradual change
+	// (fade). 1 is the value the Python picker settled on.
 	DefaultTransition = 1
 
-	// MaxTransition is the highest value confirmed working on the target
-	// hardware. It is also the largest that still encodes as one hex digit,
-	// which the payload format requires.
-	MaxTransition = 10
+	// MaxTransition is the highest accepted change-mode value. DP 28 only
+	// defines 0 (jump) and 1 (fade); the field is boolean, so anything
+	// above 1 is treated as fade by the firmware and carries no extra
+	// meaning.
+	MaxTransition = 1
 )
 
 // RGB is a 24-bit colour.
