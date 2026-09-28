@@ -3,8 +3,8 @@
 # notuya-go
 
 A dependency-free Go reimplementation of the Tuya local protocol v3.5 — the
-protocol spoken by the smart bulbs previously driven by a sibling Python
-project built on `tinytuya`.
+protocol spoken by Tuya smart bulbs on the local network, with no cloud
+round-trip.
 
 No Go or Rust library today supports protocol 3.5 (GCM + session handshake)
 — every community alternative stops at 3.1-3.3 (plain AES-ECB, no session
@@ -41,8 +41,8 @@ make build
 ./dist/notuya brightness 60
 ```
 
-Expected configuration (see `internal/config`): the same format as the
-original Python project's `config.json`; only the `devices` array is read.
+Expected configuration (see `internal/config`): a `config.json` of which only
+the `devices` array is read.
 
 ### `notuya music`
 

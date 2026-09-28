@@ -1,9 +1,8 @@
 # notuya-go
 
 A Go reimplementation of the Tuya local protocol v3.5 for controlling smart
-bulbs (model A60TY10W) over the LAN, with no third-party dependencies. It
-replaces a sibling Python project (built on `tinytuya`), removing the need
-for a Python runtime.
+bulbs (model A60TY10W) over the LAN, with no third-party dependencies and no
+Python runtime.
 
 ## Architecture
 
@@ -228,17 +227,16 @@ Precedence for the `config.json` path: `--config` flag → `NOTUYA_CONFIG`
 env → `os.UserConfigDir()/notuya-go/config.json`.
 
 Only the `devices` array of the JSON is read. Each device has:
-`device_id`, `ip_address`, `local_key`, `name`. The format is compatible
-with the Python project's `config.json`.
+`device_id`, `ip_address`, `local_key`, `name`.
 
 `notuya scan --update` is the one command that *writes* the config back —
 the equivalent of tinytuya's wizard re-writing `devices.json` after a poll.
 A scan never learns a `local_key`, so devices are matched by `device_id`
 (not IP) and only `ip_address` is rewritten, which is the field DHCP
 changes. The rewrite edits the raw JSON tree (`map[string]json.RawMessage`)
-rather than reserialising the typed `Config`, so the unmodelled top-level
-keys the Python project keeps (`follow_mode`, `theme_color`, …) and any
-extra per-device fields survive untouched. A scan that matches nothing
+rather than reserialising the typed `Config`, so unmodelled top-level keys
+(`follow_mode`, `theme_color`, …) and any extra per-device fields survive
+untouched. A scan that matches nothing
 leaves the file byte-for-byte alone. This lives in `cmd/notuya/scan.go`
 because it is CLI policy — the library never touches the filesystem. Note
 that broadcast discovery does not reach devices on every network (see the
@@ -408,9 +406,9 @@ make fmt                         # gofmt -l .
 ## Music mode
 
 `notuya music` reads `RRGGBB` lines from stdin and streams them to every
-configured device over a persistent session — the equivalent of the Python
-project's `picker.py`. See the DP 28 section above for the wire format and
-the mode entry/exit rules.
+configured device over a persistent session, so an interactive colour picker
+can drive the bulbs by writing lines. See the DP 28 section above for the
+wire format and the mode entry/exit rules.
 
 A stdin line is `RRGGBB` or `RRGGBB TT`: the optional second token is a
 per-line transition (0-10) that overrides `--transition` for that colour.
