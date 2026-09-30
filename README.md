@@ -14,7 +14,7 @@ byte-for-byte reference.
 
 ## Status
 
-A library only (`pkg/`), used in-process by `notuya-gui`. There is no
+A library only (`pkg/`), used in-process by [notuya-gui](https://github.com/alex-bluetrain/notuya-gui). There is no
 binary in this module.
 
 ## Scope
