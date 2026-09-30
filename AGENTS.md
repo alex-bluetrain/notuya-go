@@ -7,31 +7,17 @@ Python runtime.
 ## Architecture
 
 ```
-cmd/notuya/main.go          CLI: on, off, color, brightness, get-color, list, scan
-cmd/notuya/scan.go          CLI: scan --update (merge scanned IPs into config.json by device_id)
-cmd/notuya/music.go         CLI: music (stdin colour streaming)
-cmd/notuya/config.go        CLI: config.json loading and last-color cache
-cmd/notuyad/main.go         HTTP daemon: listener, graceful shutdown, mDNS, wiring
-cmd/notuyad/server.go       HTTP daemon: resourceful routes + handlers (devices/rooms/scenes/config/discover), CORS
-cmd/notuyad/stream.go       HTTP daemon: WebSocket live colour drag (per-device + per-room)
-cmd/notuyad/discovery.go    HTTP daemon: POST /discover → Tuya LAN UDP scan
-cmd/notuyad/mdns.go         HTTP daemon: advertise _notuyad._tcp over mDNS
-cmd/notuyad/config.go       HTTP daemon: config path resolution + last-color cache (package main)
 pkg/
   protocol/                  Version-agnostic interface (Session)
   protocol35/                v3.5 implementation: 6699 framing, AES-GCM, session handshake
   device/                    Raw DP-centric API and DP encoding (tinytuya BulbDevice surface)
   bulb/                      Business layer: Bulb domain methods + music streaming
   discovery/                 UDP scanner (ports 6667/7000)
-  control/                   Per-device session control, config/rooms/scenes model, live streamer, registry
 ```
 
 ### Dependency flow
 
 ```
-cmd/notuya   → device, bulb, discovery, protocol35
-cmd/notuyad  → control, device, bulb, discovery, protocol35 (per-device HTTP/WS backend)
-control      → bulb, device, protocol35
 bulb         → device, protocol
 device       → protocol (the interface, never protocol35 directly)
 discovery    → protocol, protocol35 (uses EncodeFrame/DecodeFrame with the fixed discovery key)
@@ -40,49 +26,42 @@ protocol35   → protocol (command constants)
 
 `device` and `bulb` depend only on `protocol.Session`. Adding support
 for another version (3.1/3.3) means writing a new `protocol3x.Session`
-implementing the same interface — without touching `device`, `bulb`, or the
-CLI.
+implementing the same interface — without touching `device` or `bulb`.
 
 The split mirrors tinytuya: `device.Device` is the raw, DP-centric layer
-(`SetDPs`, `SetValue`, and typed helpers like `SetColour`/`SetHSV`/
-`SetWhite`/`SetWhitePercent`/`SetColourTemp`/`SetColourTempPercent`/
-`SetScene`/`SetMode`/`SetMusicColour`, plus getters `Status`/`GetMode`/
-`GetBrightness`/`GetBrightnessPercent`/`GetColourTemp`/
-`GetColourTempPercent`/`ColourRGB`/`ColourHSV`, each write taking
+(`SetDPs`, `SetValue`, and typed helpers like `SetColour`/`SetBrightness`/
+`SetColourTemp`/`SetColourTempPercent`/`SetWhiteBrightness`/`SetMusicColour`,
+plus `Status` and the `GetXFrom(status)` readers, each write taking
 `wait bool` and speaking DP numbers), the equivalent of `BulbDevice`.
 `bulb.Bulb` is the business layer built *on top*
 of `*device.Device`: its domain methods (`TurnOn`, `SetColour`,
-`SetColourBrightness`, `SetWhiteBrightness`, `StreamColours`) always use `wait=true` internally
-and never expose a DP number. The CLI uses `bulb.Bulb` for the known
-commands; `device.Device` is exported so a caller can drive an arbitrary DP
+`SetWhiteBrightness`, `StreamColours`) always use `wait=true` internally
+and never expose a DP number. `device.Device` is exported so a caller can drive an arbitrary DP
 the business layer does not cover.
 
 `pkg/` is the library: it talks to bulbs and knows nothing else. No
 package under it prints, exits, reads the environment, or touches the
-filesystem — errors travel up and `cmd/notuya` decides what to show. That
+filesystem — errors travel up and the caller decides what to show. That
 is what lets the whole streaming path be tested against an in-process fake
-device without going near the binary.
+device.
 
 These five packages lived under `internal/` originally, which made them
 unimportable outside this module. They were promoted to `pkg/` so a sibling
 module (`notuya-gui`, a native color-wheel picker) can consume the library
-in-process instead of over the HTTP daemon — importing `bulb`/`device`/
-`protocol35` directly and driving `bulb.StreamColours` itself. In dev the
-sibling wires them up with a local `replace
-github.com/alex-bluetrain/notuya-go => ../notuya-go`, so nothing here has to
-be published or tagged. The trade-off, taken deliberately: the exported
+in-process — importing `bulb`/`device`/`discovery`/`protocol35` directly
+and driving `bulb.StreamColours` itself. In dev the sibling wires them up
+with a gitignored `go.work` pointing at `../notuya-go`, so nothing here has
+to be published or tagged. The trade-off, taken deliberately: the exported
 surface (`protocol.Session`, `device.Device`, `bulb.Bulb`, …) is now public
 API, so changing those signatures can break an external consumer — whereas
-under `internal/` the whole surface was free to churn. `discovery` moved too
-for uniformity, even though only the CLI's `scan` uses it.
+under `internal/` the whole surface was free to churn.
 
-Everything the *file layout* implies is CLI policy and lives in
-`cmd/notuya/config.go`: where `config.json` is (the `--config` >
-`NOTUYA_CONFIG` > user-config-dir precedence), which of its keys are read,
-and the `ffffff` fallback for an absent last-colour cache. It was a package
-under the library originally, which put policy at the same level as the
-protocol and split it from `resolveConfigPath` in `main.go`; nothing else
-ever imported it.
+This module is **only the protocol library** — there is no binary.
+Application concerns — config/rooms/scenes, per-device session control, the
+live-drag streamer — live in `notuya-gui`. An HTTP/WS daemon
+(`cmd/notuyad`), its backing `pkg/control`, and a CLI (`cmd/notuya`,
+including `config.json` handling and `scan --update`) used to live here;
+all were removed as obsolete.
 
 ### Core interface
 
@@ -159,12 +138,14 @@ inside the control JSON: `{"20":true,"21":"colour","24":"016903e803e8"}`.
 
 ### DP 28 (music mode)
 
-A 21-character ASCII hex string: `transition(1) + hsv16(12) +
-white_brightness(4) + colourtemp(4)`. E.g. pure red with transition 0 is
+A 21-character ASCII hex string: `change_mode(1) + hsv16(12) +
+white_brightness(4) + colourtemp(4)`. E.g. pure red with jump is
 `"0000003e803e800000000"`.
 
-- `transition` is a **single hex digit** (0-10 → `0`-`a`): the per-update
-  fade length. This is the whole point of music mode — DP 24 always applies
+- `change_mode` is a **two-valued flag**, typed as `device.ChangeMode`:
+  `ChangeJump` (0, Tuya's "direct") or `ChangeFade` (1, "gradient"). No
+  other digit is defined; the fade's duration is fixed by the firmware, so
+  drag smoothness is tuned via the send interval. This is the whole point of music mode — DP 24 always applies
   the device's own ~300-500ms fade, which makes a live colour drag lag.
 - The two trailing fields drive the **separate white channel**, not the
   colour's intensity, and are pinned to `0000`: non-zero values change how
@@ -217,38 +198,14 @@ an empty scan that looked exactly like a network limitation:
 
 > **Note**: broadcast genuinely does not reach devices on some networks
 > (AP isolation, segmentation). Direct control by IP always works, so
-> fixed IPs in `config.json` are always a fallback. Confirm a scan failure
+> fixed IPs are always a fallback. Confirm a scan failure
 > is the network before assuming it: the bugs above all presented
 > identically.
-
-## Configuration
-
-Precedence for the `config.json` path: `--config` flag → `NOTUYA_CONFIG`
-env → `os.UserConfigDir()/notuya-go/config.json`.
-
-Only the `devices` array of the JSON is read. Each device has:
-`device_id`, `ip_address`, `local_key`, `name`.
-
-`notuya scan --update` is the one command that *writes* the config back —
-the equivalent of tinytuya's wizard re-writing `devices.json` after a poll.
-A scan never learns a `local_key`, so devices are matched by `device_id`
-(not IP) and only `ip_address` is rewritten, which is the field DHCP
-changes. The rewrite edits the raw JSON tree (`map[string]json.RawMessage`)
-rather than reserialising the typed `Config`, so unmodelled top-level keys
-(`follow_mode`, `theme_color`, …) and any extra per-device fields survive
-untouched. A scan that matches nothing
-leaves the file byte-for-byte alone. This lives in `cmd/notuya/scan.go`
-because it is CLI policy — the library never touches the filesystem. Note
-that broadcast discovery does not reach devices on every network (see the
-Discovery section), so `--update` is only as good as what the scan finds;
-a fixed IP edited by hand is always the fallback.
 
 ## Code conventions
 
 - **Go 1.23**, module `github.com/alex-bluetrain/notuya-go`.
 - **Zero external dependencies** — everything with the stdlib (`crypto/aes`, `crypto/cipher`, `crypto/hmac`, `crypto/sha256`, `crypto/md5`, `encoding/binary`, `encoding/json`).
-- Every CLI operation is open → handshake → command(s) → close (non-persistent connections). `music` is the exception: one session per device for the whole run.
-- Concurrent fan-out to all devices with `sync.WaitGroup`, per-device error isolation.
 - `Session` deadlines are set per direction (`SetReadDeadline`/`SetWriteDeadline`, never `SetDeadline`): during a stream a `wait=false` write must not disturb the read deadline owned by the concurrent `DrainInbound`.
 - A deadline must never outlive the operation it bounds. A session lives far
   longer than the short context that opened it, so `Open` clears the
@@ -258,10 +215,6 @@ a fixed IP edited by hand is always the fallback.
   silently: fire-and-forget sends never look at the error.
 - Warm-up with `Status()` (a throwaway query) before the real command — mirrors `ctl.py`'s pattern.
 - Color conversion: an exact port of Python's `colorsys.rgb_to_hsv`, with truncation (not rounding) for bit-for-bit parity with tinytuya.
-- Every device command reports success per device *and* in the exit status.
-  `forEachDevice` returns whether all of them succeeded and the CLI exits 1
-  if not. Printing `FAIL:` to stderr and exiting 0 is invisible to a script
-  wrapping the binary; it was the behaviour of every command except `music`.
 
 ## Decisions taken against tinytuya
 
@@ -278,45 +231,31 @@ of this codebase, and feature parity is not a reason to give it up.
 **Adopted, but layered.** tinytuya's generic `set_value`/raw-DP access is
 replicated — `device.Device.SetValue`/`SetDPs` — but it lives in the raw
 layer, not at the same level as the domain commands. `bulb.Bulb` is the
-layer that knows what each DP *means*, which is why the CLI's known commands
-still never touch a DP number; a caller who needs an uncovered DP reaches
+layer that knows what each DP *means*, so domain callers never touch a DP
+number; a caller who needs an uncovered DP reaches
 for `device.Device` deliberately.
 
-`device.Device` also carries the rest of `BulbDevice`'s "sugar" surface with
-faithful signatures — the one change is `nowait bool` → `wait bool`, to match
-`Session`. It lives in `device/sugar.go`, split from the generic DP access
-(`SetDPs`/`SetValue`/`Status`) in `device/device.go` the way its tests are
-already split (`device_test.go` + `sugar_test.go`). Setters: `SetHSV`
-(h/s/v each 0-1), `SetScene`,
-`SetWhitePercent`, `SetColourTempPercent`. Getters:
-`GetMode`/`GetBrightness`/`GetBrightnessPercent`/`GetColourTemp`/
-`GetColourTempPercent`/`ColourRGB`/`ColourHSV`. The percentage helpers
-scale against `BrightnessMax` (1000, the Type-B full scale) and truncate to
-the raw DP int. tinytuya takes an int percent (`value_max * pct // 100`);
-here the percent setters/getters are all `float64` so the surface is
-symmetric (you write what a getter would return) and fractional percents
-scale — 33.3% → 333, where int 33 would give 330.
-`SetHSV`/`ColourRGB`/`ColourHSV` round-trip through ports of
-`colorsys.hsv_to_rgb`/`rgb_to_hsv` with truncation, for bit-for-bit parity
-(see `colour.go`). `SetScene` uses the "Type A" layout (scene index folded
-into the mode enum as `scene_<n>`), since the A60TY10W has no separate
-scene_data DP. `SetMode` asserts `switch:true` alongside the mode, as
-tinytuya does.
+`device.Device` also carries a trimmed subset of `BulbDevice`'s "sugar"
+surface — only what `notuya-gui` uses — with faithful signatures apart from
+`nowait bool` → `wait bool`, to match `Session`. It lives in
+`device/sugar.go`, split from the generic DP access (`SetDPs`/`SetValue`/
+`Status`) in `device/device.go`. The percent helpers scale against
+`BrightnessMax` (1000, the Type-B full scale), take `float64`, and truncate
+to the raw DP int, so fractional percents scale (33.3% → 333). The rest of
+tinytuya's sugar (`SetHSV`, `SetScene`, `SetMode`, `SetWhite`, `SetWhitePercent`, the
+`GetX(ctx)` getters, …) was removed as unused; add back only what a caller
+needs.
 
 Two deliberate departures from tinytuya's exact behaviour here:
 
-- **`SetHSV` (and `SetColour`) do not force the bulb on.** tinytuya's
-  `set_hsv`/`set_colour` assert `switch:true`; here both only set mode +
-  colour and leave on/off to `TurnOn`/`TurnOff`. Setting a colour on an
-  off bulb should not silently turn it on, and the two colour setters must
-  agree on that.
-- **The getters mirror tinytuya's optional `state=` parameter with a pair
-  of forms.** `GetX(ctx)` fetches a fresh `Status` and reads one value —
-  the one-shot path `Status` already served as tinytuya's `state()`.
-  `GetXFrom(status)` (`GetModeFrom`, `ColourRGBFrom`, …) reads from a
-  status map the caller already fetched, so printing full state costs one
-  round-trip instead of one per getter. The `GetX(ctx)` forms are just
-  `Status` + the matching `GetXFrom`.
+- **`SetColour` does not force the bulb on.** tinytuya's `set_colour`
+  asserts `switch:true`; here it only sets mode + colour and leaves on/off
+  to `TurnOn`/`TurnOff`. Setting a colour on an off bulb should not
+  silently turn it on.
+- **Getters read an already-fetched status.** tinytuya's getters take an
+  optional `state=`; here only that form exists: `GetXFrom(status)`
+  (`GetModeFrom`, `ColourHSVFrom`, …) reads from a map the caller got from
+  one `Status` call, so reading full state costs one round-trip.
 
 **Deferred, with a known trigger.**
 
@@ -358,16 +297,12 @@ NOTUYA_INTEGRATION=1 \
 
 - `protocol35/frame_test.go`: 6699 frame encode/decode round-trip, corruption rejection, retcode stripping.
 - `protocol35/handshake_test.go`: validation against a real capture fixture (`testdata/handshake/session1.json`).
-- `cmd/notuya/config_test.go`: config.json parsing and last-color round-trip.
-- `cmd/notuya/scan_test.go`: `scan --update` merges a scan result into config.json by `device_id` — rewrites a matched IP, preserves `local_key`/`name`/unmodelled top-level keys, and leaves the file untouched when nothing matches or the IP is unchanged.
 - `device/device_test.go`: CONTROL_NEW/DP_QUERY_NEW payload construction (`SetDPs`/`SetValue`), fire-and-forget sends, and `Status` response parsing against a mock session.
-- `device/sugar_test.go`: the sugar setters (`SetHSV` — which must *not* assert the switch — `SetScene`, `SetWhitePercent`, `SetColourTempPercent`, `SetMode`'s switch assertion) produce the right DP payloads, both getter forms (`GetX(ctx)` and `GetXFrom(status)`) parse a mock status, and range checks reject out-of-range input.
-- `device/colour_test.go`: RGB ↔ hsv16 hex round-trip, plus the h/s/v → hsv16 (`SetHSV`) and hsv16 → RGB (`ColourRGB`) paths against tinytuya reference vectors.
-- `device/music_test.go`: DP 28 (`musicColourHex`) encoding and transition-range validation.
-- `bulb/music_test.go`: streaming payload shape, latest-wins coalescing, zero-transition handling, per-colour transition override (nil falls back to the run default), drain shutdown, and the StreamSession capability check.
+- `device/sugar_test.go`: the sugar setters produce the right DP payloads, the `GetXFrom(status)` readers parse a status map, and range checks reject out-of-range input.
+- `device/colour_test.go`: RGB → hsv16 hex against tinytuya reference vectors.
+- `device/music_test.go`: DP 28 (`musicColourHex`) encoding and change-mode validation.
+- `bulb/music_test.go`: streaming payload shape, latest-wins coalescing, jump (zero-value) handling, per-colour change-mode override (nil falls back to the run default), drain shutdown, and the StreamSession capability check.
 - `discovery/discovery_test.go`: fixed discovery key validation, plus the announcement parsing each scanner bug hid in — retcode-prefixed replies, bare announcements, our own request echoed back, duplicate broadcast targets.
-- `cmd/notuya/music_test.go`: the stdin broadcast never blocks and keeps the newest colour.
-- `cmd/notuya/foreach_test.go`: a failing device makes the CLI exit non-zero. Uses `192.0.2.1` (RFC 5737 TEST-NET-1, guaranteed unroutable) and shortens `commandTimeout`, which is a `var` only so this test does not spend 10s per dial.
 - Integration tests gated behind `NOTUYA_INTEGRATION` so `go test ./...` is hermetic by default.
 
 The streaming path is also covered **without hardware**:
@@ -382,10 +317,10 @@ neither `device` nor `bulb` imports `protocol35`.
 
 - `bulb/raw_test.go`: `Raw()` returns the Bulb's own `*device.Device` wired
   to the same session, so a raw DP write goes out as a CONTROL_NEW. `Raw()`
-  has no CLI consumer yet; this test is what keeps that deliberate public
+  has no in-module consumer; this test is what keeps that deliberate public
   surface exercised.
 - `bulb/bulb_integration_test.go`: the full business surface
-  (`Status`, `TurnOn`, `SetColour`, `SetColourBrightness`, `TurnOff`)
+  (`Status`, `TurnOn`, `SetColour`, `TurnOff`)
   against real hardware, gated behind `NOTUYA_INTEGRATION`.
 
 Run the streaming tests with `-race`: they are the only concurrent paths in
@@ -394,38 +329,28 @@ the project.
 ## Build
 
 ```bash
-make build                       # local binary in dist/notuya
-make build-all                   # cross-compile linux-amd64 + windows-amd64
+make build                       # go build ./...
+make check                       # vet + test
 make test                        # go test ./...
 make vet                         # go vet ./...
 make fmt                         # gofmt -l .
 ```
 
-`CGO_ENABLED=0` on cross-compile — there is no cgo in any package.
+There is no cgo in any package.
 
 ## Music mode
 
-`notuya music` reads `RRGGBB` lines from stdin and streams them to every
-configured device over a persistent session, so an interactive colour picker
-can drive the bulbs by writing lines. See the DP 28 section above for the
-wire format and the mode entry/exit rules.
+`bulb.StreamColours` streams colours from a channel to one device over a
+persistent session, so an interactive colour picker can drive a bulb live.
+See the DP 28 section above for the wire format and the mode entry/exit
+rules.
 
-A stdin line is `RRGGBB` or `RRGGBB TT`: the optional second token is a
-per-line transition (0-10) that overrides `--transition` for that colour.
-This is what lets a picker's transition slider take effect live — the flag
-sets a fixed value for the whole session, but the slider streams the new
-value with each colour, without relaunching the process. A line whose
-transition is out of range is reported to stderr and skipped; the stream
-stays alive. The unit that flows through the stream is `bulb.StreamColour`
-(a `device.RGB` plus an optional `*int` transition); a nil transition falls
-back to `StreamOptions.Transition`, so a producer that only ever writes bare
-`RRGGBB` behaves exactly as before.
-
-`--transition` (0-10) and `--interval` are exposed as flags for tuning drag
-feel by hand. `--transition` is the default for lines that omit their own.
-`bulb.StreamOptions.Transition` (and `bulb.StreamColour.Transition`) is a
-`*int` rather than an `int` because 0 is a meaningful value (no fade), so it
-cannot double as "unset"; use `bulb.Transition(n)` to build one.
+The unit that flows through the stream is `bulb.StreamColour` (a
+`device.RGB` plus an optional `*device.ChangeMode`); a nil mode falls back to
+`StreamOptions.ChangeMode`, which is what lets a picker's jump/fade toggle
+take effect live mid-stream. Both are pointers because `ChangeJump` is the
+zero value and must not double as "unset"; use `device.ChangeJump.Ptr()` /
+`device.ChangeFade.Ptr()`.
 
 The flow, in `bulb.StreamColours`:
 
@@ -436,87 +361,15 @@ The flow, in `bulb.StreamColours`:
    ~25fps) and coalesced newest-wins.
 4. `HEART_BEAT` if nothing was sent for ~5s, since Tuya devices drop idle
    connections and a drag pauses whenever the pointer stops.
-5. On stdin close or ctx cancel: flush the pending colour, stop the drain,
+5. On channel close or ctx cancel: flush the pending colour, stop the drain,
    then `SetColour` to leave music mode with the final colour persisted.
 
-The CLI broadcasts one stdin to per-device channels (`offer` in
-`cmd/notuya/music.go`) so a slow or dead bulb cannot stall the reader or the
-other devices. SIGINT is a clean stop, not a kill: otherwise a bulb is left
+Cancel the context for a clean stop; abandoning the stream leaves the bulb
 stuck in music mode.
 
 Known limitations: no reconnect if a device drops mid-stream (it is reported
 and that device stops), and colour-temperature/white-mode dragging is not
 supported — only RGB.
-
-## HTTP daemon (`cmd/notuyad`)
-
-`notuyad` is the HTTP/WebSocket backend for the `notuya-mobile` app. It
-exposes the full per-device feature set of the GUI — power, colour,
-brightness, colour temperature, live colour drag, rooms, scenes, discovery
-and config editing — over a resourceful JSON API keyed by `device_id`. The
-daemon owns all Tuya protocol work; the mobile client only ever speaks
-HTTP/JSON and WebSocket to it.
-
-Unlike the old broadcast appliance, the daemon keeps **one persistent
-per-device session** (`pkg/control.Control`): every command serializes
-behind a per-device mutex, and a live colour drag borrows a short-lived
-music-mode streamer. The device layer is a `pkg/control.Registry` keyed by
-`device_id`; rooms/scenes resolve to member controls and fan out.
-
-### Endpoints
-
-```
-Devices / control (target one device by id):
-GET  /devices                    list devices ({device_id, name, ip_address, room?})
-GET  /devices/{id}               parsed status ({on, mode, bright_pct, temp_pct, hue, sat, has_colour, has_temp})
-POST /devices/{id}/power         {on: bool}
-POST /devices/{id}/color         {r,g,b} or {hue,sat[,bright]}
-POST /devices/{id}/brightness    {pct}  (colour-v aware)
-POST /devices/{id}/temperature   {pct}  (white mode)
-WS   /devices/{id}/stream        live drag; text frames "RRGGBB [TT]"
-
-Rooms:
-GET  /rooms                      resolved groups (incl. synthetic "No room")
-POST /rooms/{name}/power         {on}  (fan-out)
-WS   /rooms/{name}/stream        live drag; fan-out
-
-Scenes:
-GET  /scenes
-POST /scenes/{name}/apply        fan-out discrete commands, best-effort
-POST /scenes/{name}/capture      build states from current live status, persist
-DELETE /scenes/{name}
-
-Discovery / config:
-POST /discover                   {timeout_ms} → [{id, ip, version}]  (Tuya LAN UDP scan)
-GET  /config/devices             the devices array
-PUT  /config/devices             replace the devices array, persist, rebuild registry
-```
-
-Discrete write endpoints return `200 {"ok":true}` on success, `502
-{"ok":false}` when a device command failed, `404` for an unknown
-device/room/scene, `400` for a bad body. CORS is permissive (any origin) —
-trusted LAN only, **no authentication**.
-
-### Live colour drag over WebSocket
-
-`WS /devices/{id}/stream` (and `/rooms/{name}/stream`) replaces the old
-chunked `POST /stream` — React Native's `fetch` can't reliably stream a
-request body, so the drag moved to a WebSocket. The client sends text frames
-`"RRGGBB [TT]"` during the drag; each frame feeds the device's music-mode
-streamer (newest-wins, so a phone flooding frames never stalls the bulb).
-When the socket closes cleanly the bulb is left on the last streamed colour
-with a normal `SetColour` write (music mode exited, colour persisted), and
-that colour is saved to the last-colour cache. `TT` (0-10) is the per-frame
-transition.
-
-### Binding and discovery
-
-Binds `0.0.0.0:8765` by default so the phone can reach it. Pass `--addr
-0.0.0.0:0` for an ephemeral port; the resolved address is still written to
-`notuyad.addr` next to `config.json`. The daemon advertises itself over
-**mDNS** as `_notuyad._tcp` (`--mdns`, on by default) so the app can browse
-for it without a typed URL; it deregisters on shutdown. `SIGINT`/`SIGTERM`
-trigger a graceful `http.Server.Shutdown` and close every device session.
 
 ## Working in this repo
 

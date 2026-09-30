@@ -20,7 +20,7 @@ const (
 	DPBrightness = "22" // bright_value_v2 (int 10-1000)
 	DPColourTemp = "23" // temp_value_v2 (int 0-1000)
 	DPColour     = "24" // colour_data_v2 (hsv16 hex string)
-	DPMusic      = "28" // music_data (transition + hsv16 + white fields)
+	DPMusic      = "28" // music_data (change mode + hsv16 + white fields)
 )
 
 // Work-mode values for DPMode.

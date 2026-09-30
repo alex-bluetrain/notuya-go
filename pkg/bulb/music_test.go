@@ -99,11 +99,11 @@ func musicDPSFromPayload(t *testing.T, payload []byte) map[string]any {
 
 // musicColourHex reconstructs the expected DP 28 value for assertions,
 // mirroring device.SetMusicColour's encoding.
-func musicColourHexRef(t *testing.T, transition int, r, g, b uint8) string {
+func musicColourHexRef(t *testing.T, mode device.ChangeMode, r, g, b uint8) string {
 	t.Helper()
 	mock := newMockStreamSession()
 	d := device.NewDevice(mock, "ref")
-	if err := d.SetMusicColour(context.Background(), transition, r, g, b, false); err != nil {
+	if err := d.SetMusicColour(context.Background(), mode, r, g, b, false); err != nil {
 		t.Fatalf("SetMusicColour: %v", err)
 	}
 	dps := musicDPSFromPayload(t, mock.recorded()[0].payload)
@@ -114,10 +114,10 @@ func musicColourHexRef(t *testing.T, transition int, r, g, b uint8) string {
 	return s
 }
 
-// TestStreamColoursHonoursZeroTransition guards the reason Transition is a
-// pointer: zero is a meaningful setting (instant, no fade), so it must reach
-// the wire instead of being read as "unset" and replaced by the default.
-func TestStreamColoursHonoursZeroTransition(t *testing.T) {
+// TestStreamColoursHonoursJump guards the reason ChangeMode is a pointer:
+// its zero value (ChangeJump) is a meaningful setting, so it must reach the
+// wire instead of being read as "unset" and replaced by the default (fade).
+func TestStreamColoursHonoursJump(t *testing.T) {
 	mock := newMockStreamSession()
 	b := NewBulb(mock, "test")
 
@@ -127,7 +127,7 @@ func TestStreamColoursHonoursZeroTransition(t *testing.T) {
 
 	err := b.StreamColours(context.Background(), colours, StreamOptions{
 		Interval:   time.Millisecond,
-		Transition: Transition(0),
+		ChangeMode: device.ChangeJump.Ptr(),
 	})
 	if err != nil {
 		t.Fatalf("StreamColours: %v", err)
@@ -137,9 +137,9 @@ func TestStreamColoursHonoursZeroTransition(t *testing.T) {
 	last := calls[len(calls)-1]
 	dps := musicDPSFromPayload(t, last.payload)
 	got := dps[device.DPMusic]
-	want := musicColourHexRef(t, 0, 255, 0, 0)
+	want := musicColourHexRef(t, device.ChangeJump, 255, 0, 0)
 	if got != want {
-		t.Errorf("DP %s = %q, want %q (transition 0 must survive)", device.DPMusic, got, want)
+		t.Errorf("DP %s = %q, want %q (jump must survive)", device.DPMusic, got, want)
 	}
 }
 
@@ -155,7 +155,7 @@ func TestStreamColoursPayloadShape(t *testing.T) {
 
 	err := b.StreamColours(context.Background(), colours, StreamOptions{
 		Interval:   time.Millisecond,
-		Transition: Transition(1),
+		ChangeMode: device.ChangeFade.Ptr(),
 	})
 	if err != nil {
 		t.Fatalf("StreamColours: %v", err)
@@ -198,7 +198,7 @@ func TestStreamColoursPayloadShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("payload dps = %v, want a DP %s entry", dps, device.DPMusic)
 	}
-	want := musicColourHexRef(t, 1, 255, 0, 0)
+	want := musicColourHexRef(t, device.ChangeFade, 255, 0, 0)
 	if got != want {
 		t.Errorf("DP %s = %v, want %q", device.DPMusic, got, want)
 	}
@@ -215,7 +215,7 @@ func TestStreamColoursCoalesces(t *testing.T) {
 	go func() {
 		done <- b.StreamColours(context.Background(), colours, StreamOptions{
 			Interval:   50 * time.Millisecond,
-			Transition: Transition(1),
+			ChangeMode: device.ChangeFade.Ptr(),
 		})
 	}()
 
@@ -244,7 +244,7 @@ func TestStreamColoursCoalesces(t *testing.T) {
 
 	// Whatever the throttle dropped, the final colour must be the newest.
 	dps := musicDPSFromPayload(t, colourCalls[len(colourCalls)-1].payload)
-	want := musicColourHexRef(t, 1, 9, 0, 0)
+	want := musicColourHexRef(t, device.ChangeFade, 9, 0, 0)
 	if got := dps[device.DPMusic]; got != want {
 		t.Errorf("last colour = %v, want %q (the newest colour of the burst)", got, want)
 	}
@@ -290,7 +290,7 @@ func TestStreamColoursRequiresStreamSession(t *testing.T) {
 }
 
 // lastMusicHex runs a single-colour stream and returns the DP 28 value that
-// reached the wire, so a test can assert which transition was encoded.
+// reached the wire, so a test can assert which change mode was encoded.
 func lastMusicHex(t *testing.T, c StreamColour, opts StreamOptions) string {
 	t.Helper()
 	mock := newMockStreamSession()
@@ -319,22 +319,22 @@ func lastMusicHex(t *testing.T, c StreamColour, opts StreamOptions) string {
 	return ""
 }
 
-// TestStreamColoursPerColourTransition checks that a StreamColour carrying
-// its own transition overrides the run default, while one that leaves it nil
-// falls back to StreamOptions.Transition. This is what lets a picker's
-// transition slider take effect live.
-func TestStreamColoursPerColourTransition(t *testing.T) {
-	opts := StreamOptions{Transition: Transition(1)}
+// TestStreamColoursPerColourChangeMode checks that a StreamColour carrying
+// its own change mode overrides the run default, while one that leaves it nil
+// falls back to StreamOptions.ChangeMode. This is what lets a picker's
+// jump/fade toggle take effect live.
+func TestStreamColoursPerColourChangeMode(t *testing.T) {
+	opts := StreamOptions{ChangeMode: device.ChangeFade.Ptr()}
 
-	// A per-colour transition (7) must reach the wire, not the default (1).
-	got := lastMusicHex(t, StreamColour{RGB: device.RGB{R: 255}, Transition: Transition(7)}, opts)
-	if want := musicColourHexRef(t, 7, 255, 0, 0); got != want {
-		t.Errorf("per-colour transition: DP %s = %q, want %q", device.DPMusic, got, want)
+	// A per-colour change mode (jump) must reach the wire, not the default (fade).
+	got := lastMusicHex(t, StreamColour{RGB: device.RGB{R: 255}, ChangeMode: device.ChangeJump.Ptr()}, opts)
+	if want := musicColourHexRef(t, device.ChangeJump, 255, 0, 0); got != want {
+		t.Errorf("per-colour change mode: DP %s = %q, want %q", device.DPMusic, got, want)
 	}
 
-	// A nil transition falls back to the run default (1).
+	// A nil change mode falls back to the run default (fade).
 	got = lastMusicHex(t, StreamColour{RGB: device.RGB{G: 255}}, opts)
-	if want := musicColourHexRef(t, 1, 0, 255, 0); got != want {
-		t.Errorf("nil transition: DP %s = %q, want %q", device.DPMusic, got, want)
+	if want := musicColourHexRef(t, device.ChangeFade, 0, 255, 0); got != want {
+		t.Errorf("nil change mode: DP %s = %q, want %q", device.DPMusic, got, want)
 	}
 }

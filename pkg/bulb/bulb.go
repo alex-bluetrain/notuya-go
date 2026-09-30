@@ -50,13 +50,6 @@ func (b *Bulb) SetColour(ctx context.Context, r, g, bl uint8) error {
 	return b.dev.SetColour(ctx, r, g, bl, true)
 }
 
-// SetColourBrightness adjusts the brightness of the current colour (the "v"
-// of DP 24) as a 0-100 percentage without changing hue/saturation or leaving
-// colour mode (see device.Device.SetColourBrightness).
-func (b *Bulb) SetColourBrightness(ctx context.Context, pct float64) error {
-	return b.dev.SetColourBrightness(ctx, pct, true)
-}
-
 // SetWhiteBrightness sets white-mode brightness as a 0-100 percentage,
 // switching the bulb to white mode (see device.Device.SetWhiteBrightness).
 func (b *Bulb) SetWhiteBrightness(ctx context.Context, pct float64) error {

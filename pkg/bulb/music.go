@@ -29,31 +29,27 @@ type StreamOptions struct {
 	// faster are coalesced, newest wins.
 	Interval time.Duration
 
-	// Transition is the per-update fade length (0-10) sent on DP 28. Zero
-	// is a meaningful setting (instant, visibly steppy) rather than
-	// "unset", so leave it nil to take the default.
-	Transition *int
+	// ChangeMode is the per-update jump/fade flag sent on DP 28. Its zero
+	// value (ChangeJump) is a meaningful setting rather than "unset", so
+	// leave it nil to take device.DefaultChangeMode.
+	ChangeMode *device.ChangeMode
 }
 
-// Transition returns a pointer suitable for StreamOptions.Transition.
-func Transition(n int) *int { return &n }
-
 // StreamColour is one unit of a colour stream: a colour plus an optional
-// per-update fade length. A nil Transition falls back to the run's default
-// (StreamOptions.Transition), so a producer that never sets it behaves
+// change mode. A nil ChangeMode falls back to the run's default
+// (StreamOptions.ChangeMode), so a producer that never sets it behaves
 // exactly as if it streamed bare colours.
 type StreamColour struct {
 	RGB        device.RGB
-	Transition *int
+	ChangeMode *device.ChangeMode
 }
 
 func (o StreamOptions) withDefaults() StreamOptions {
 	if o.Interval <= 0 {
 		o.Interval = DefaultStreamInterval
 	}
-	if o.Transition == nil {
-		d := device.DefaultTransition
-		o.Transition = &d
+	if o.ChangeMode == nil {
+		o.ChangeMode = device.DefaultChangeMode.Ptr()
 	}
 	return o
 }
@@ -109,11 +105,11 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, o
 	}()
 
 	send := func(c StreamColour) error {
-		transition := *opts.Transition
-		if c.Transition != nil {
-			transition = *c.Transition
+		mode := *opts.ChangeMode
+		if c.ChangeMode != nil {
+			mode = *c.ChangeMode
 		}
-		if err := b.dev.SetMusicColour(ctx, transition, c.RGB.R, c.RGB.G, c.RGB.B, false); err != nil {
+		if err := b.dev.SetMusicColour(ctx, mode, c.RGB.R, c.RGB.G, c.RGB.B, false); err != nil {
 			return fmt.Errorf("bulb: %s: streaming colour: %w", b.Name, err)
 		}
 		return nil
