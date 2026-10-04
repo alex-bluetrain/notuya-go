@@ -6,11 +6,11 @@ A dependency-free Go reimplementation of the Tuya local protocol v3.5 — the
 protocol spoken by Tuya smart bulbs on the local network, with no cloud
 round-trip.
 
-No Go or Rust library today supports protocol 3.5 (GCM + session handshake)
-— every community alternative stops at 3.1-3.3 (plain AES-ECB, no session
-negotiation). This project implements it from scratch, using
-[`tinytuya`](https://github.com/jasonacox/tinytuya)'s own source as a
-byte-for-byte reference.
+When this project started (2026), no Go or Rust library supported protocol
+3.5 (GCM + session handshake) — the community alternatives stopped at
+3.1-3.3 (plain AES-ECB, no session negotiation). This project implements it
+from scratch, using [`tinytuya`](https://github.com/jasonacox/tinytuya)'s own
+source as a byte-for-byte reference.
 
 ## Status
 

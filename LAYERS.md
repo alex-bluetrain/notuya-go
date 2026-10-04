@@ -153,7 +153,7 @@ Speaks the user's language. Never names a DP number or a message code.
 - **Verbs:** `TurnOn`, `TurnOff`, `SetColour(RGB)`, `SetColourHSV`,
   `SetWhiteBrightness(%)`, `SetColourTempPercent(%)`, `SetScene`,
   `SetTimer`, `SetDoNotDisturb`, `SetMusicSync`.
-- **Reads:** `Status` (also learns the schema), `Capabilities` (the DPs the
+- **Reads:** `Status`, `Capabilities` (the DPs the
   bulb reports), `Refresh`, and `Watch(ctx)`, which delivers pushes as
   `dp.State`.
 - **Streaming:** `StreamColours(ctx, colours, opts)` sends fire-and-forget

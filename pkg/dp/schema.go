@@ -126,13 +126,13 @@ func (s Schema) Scene(sc SceneValue) (Values, error) {
 // RealTime writes one DP 28 ("real-time adjustment") value. Writing DP 28
 // is what colour streaming uses; it does not need a mode write first.
 func (s Schema) RealTime(a Adjust) (Values, error) {
-	return s.adjust(Control, "real-time adjustment", a)
+	return adjust(Control, a)
 }
 
 // MusicSync writes one DP 27 ("music sync") value.
-func (s Schema) MusicSync(a Adjust) (Values, error) { return s.adjust(Music, "music sync", a) }
+func (s Schema) MusicSync(a Adjust) (Values, error) { return adjust(Music, a) }
 
-func (s Schema) adjust(id ID, what string, a Adjust) (Values, error) {
+func adjust(id ID, a Adjust) (Values, error) {
 	h, err := a.Hex()
 	if err != nil {
 		return nil, err
@@ -141,9 +141,7 @@ func (s Schema) adjust(id ID, what string, a Adjust) (Values, error) {
 }
 
 // DoNotDisturb sets DP 34.
-func (s Schema) DoNotDisturb(on bool) (Values, error) {
-	return Values{DoNotDisturb: on}, nil
-}
+func (s Schema) DoNotDisturb(on bool) Values { return Values{DoNotDisturb: on} }
 
 // Raw writes binary data b to a raw DP (30–33, 209, 210); build b with the
 // Encode functions in this package.

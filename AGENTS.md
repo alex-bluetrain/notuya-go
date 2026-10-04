@@ -82,8 +82,7 @@ consumer is the sibling `notuya-gui`, wired in dev with a gitignored
   `SetColourTempPercent`, `SetScene`, `SetTimer`, `SetDoNotDisturb`,
   `SetMusicSync`), `Status`/`Capabilities`/`Refresh`, `Watch` (pushes decoded
   to `dp.State`), `StreamColours`, and `Set(dp.Values)` as the escape hatch
-  for DPs without a verb. Verbs always wait for the ack. The schema is
-  learned from the first `Status`.
+  for DPs without a verb. Verbs always wait for the ack.
 - **`discovery`** — `Scan` (solicit + listen for a window) and `Listen`
   (passive announcements on 6667/6666).
 

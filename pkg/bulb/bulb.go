@@ -181,11 +181,7 @@ func (b *Bulb) SetTimer(ctx context.Context, seconds int) error {
 // SetDoNotDisturb turns the do-not-disturb (power-outage memory guard) on
 // or off.
 func (b *Bulb) SetDoNotDisturb(ctx context.Context, on bool) error {
-	vs, err := dp.Schema20.DoNotDisturb(on)
-	if err != nil {
-		return b.errorf("set do not disturb", err)
-	}
-	return b.write(ctx, "set do not disturb", vs)
+	return b.write(ctx, "set do not disturb", dp.Schema20.DoNotDisturb(on))
 }
 
 // SetMusicSync writes one DP 27 ("music sync") value.
