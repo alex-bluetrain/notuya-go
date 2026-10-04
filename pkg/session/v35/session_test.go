@@ -101,10 +101,10 @@ func TestPushArrivesDuringStream(t *testing.T) {
 		}
 	}
 	d.waitFor(t, cmdControl, 50)
-	d.sendPush(`{"dps":{"21":"music"}}`)
+	d.sendPush(`{"dps":{"20":false}}`)
 	select {
 	case p := <-s.Pushes():
-		if string(p.Body) != `{"dps":{"21":"music"}}` {
+		if string(p.Body) != `{"dps":{"20":false}}` {
 			t.Errorf("push = %s", p.Body)
 		}
 	case <-time.After(time.Second):

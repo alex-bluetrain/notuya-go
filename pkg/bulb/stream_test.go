@@ -62,7 +62,7 @@ func TestStreamColoursPayloadShape(t *testing.T) {
 	}
 	for _, dps := range m.controls(t) {
 		if _, ok := dps["21"]; ok {
-			t.Errorf("stream writes DP 21 (%v); music mode must be entered via DP 28 only", dps)
+			t.Errorf("stream writes DP 21 (%v); a stream writes DP 28 only", dps)
 		}
 	}
 	got := lastControl(t, m)

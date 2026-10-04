@@ -38,7 +38,7 @@ func TestBulbEndToEnd(t *testing.T) {
 		if i == 1 {
 			// The bulb reports something mid-stream; it must reach
 			// Watch without disturbing the stream.
-			d.sendPush(`{"dps":{"21":"music"}}`)
+			d.sendPush(`{"dps":{"20":false}}`)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -49,8 +49,8 @@ func TestBulbEndToEnd(t *testing.T) {
 
 	select {
 	case st := <-watch:
-		if st.Mode != dp.ModeMusic {
-			t.Errorf("watched state = %+v, want music mode", st)
+		if st.On || !st.Has(dp.Switch) {
+			t.Errorf("watched state = %+v, want the pushed switch off", st)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("push during stream never reached Watch")

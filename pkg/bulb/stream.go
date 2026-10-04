@@ -59,18 +59,16 @@ func (o StreamOptions) withDefaults() StreamOptions {
 // pending colour: when the producer outruns the bulb, the point is to track
 // the latest colour, not to replay a backlog of stale ones.
 //
-// Writing DP 28 alone is also what puts the bulb into music mode —
-// deliberately, instead of setting DP 21 first. Writing the mode DP resets
-// the bulb's colour before the first update arrives, which shows up as a
-// visible flicker at the start of every drag. (Tuya's spec pairs music mode
-// with DP 21 + DP 27; on the A60TY10W DP 28 alone is what works.)
+// The stream writes DP 28 alone, never DP 21 first: writing the mode DP
+// resets the bulb's colour before the first update arrives, which shows up
+// as a visible flicker at the start of every drag.
 //
 // The bulb only acks the first message of a run, so sends never wait. The
 // session's reader goroutine absorbs whatever the bulb sends meanwhile, so
 // the session stays usable for ordinary commands during and after the
-// stream. Finish a stream with SetColour: it exits music mode and persists
-// the final colour in one step, where setting DP 21 back to "colour" would
-// instead revert the bulb to the colour it had before the stream started.
+// stream. Finish a stream with SetColour: it persists the final colour,
+// where setting DP 21 back to "colour" alone would instead revert the bulb
+// to the colour it had before the stream started.
 func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, opts StreamOptions) error {
 	opts = opts.withDefaults()
 	schema := b.Schema()

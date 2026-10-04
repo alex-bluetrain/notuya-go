@@ -89,10 +89,10 @@ consumer is the sibling `notuya-gui`, wired in dev with a gitignored
 PRIMITIVES.md is the spec. Where observed hardware disagrees, the code
 follows the hardware:
 
-- **Music mode is entered by writing DP 28 alone.** The spec says DP 21
-  `"music"` + DP 27. On the A60TY10W, writing DP 21 first resets the colour
-  (a visible flicker at the start of every drag), and DP 28 by itself enters
-  the mode. See *DP 28* below.
+- **Live streaming writes DP 28 alone.** The spec's music feature is DP 21
+  `"music"` + DP 27. Streaming uses DP 28 (real-time adjustment) instead and
+  never writes DP 21: on the A60TY10W, writing DP 21 first resets the colour
+  (a visible flicker at the start of every drag). See *DP 28* below.
 - **Mode is sent as `"colour"`.** The spec spells it `"color"`; the bulbs
   and tinytuya use `"colour"`. `dp.ParseMode` accepts both on decode.
 - **DP 27/28 white fields are sent as zero.** The spec's example has
@@ -157,7 +157,7 @@ DP_QUERY_NEW=0x10        UPDATEDPS=0x12           REQ_DEVINFO=0x25
 E.g. pure red = `"000003e803e8"`. It travels as the value of key `"24"`
 inside the control JSON: `{"20":true,"21":"colour","24":"016903e803e8"}`.
 
-### DP 28 (real-time adjustment / music mode)
+### DP 28 (real-time adjustment)
 
 Tuya calls DP 28 `control_data` ("real-time adjustment"); DP 27
 `music_data` takes the same payload. Streaming uses DP 28
@@ -168,19 +168,20 @@ white_brightness(4) + colourtemp(4)`. E.g. pure red with jump is
 - `change_mode` is a **two-valued flag**, typed as `dp.ChangeMode`:
   `ChangeJump` (0, Tuya's "direct") or `ChangeFade` (1, "gradient"). No
   other digit is defined; the fade's duration is fixed by the firmware, so
-  drag smoothness is tuned via the send interval. This is the whole point of music mode — DP 24 always applies
+  drag smoothness is tuned via the send interval. This is the whole point of DP 28 — DP 24 always applies
   the device's own ~300-500ms fade, which makes a live colour drag lag.
 - The two trailing fields drive the **separate white channel**, not the
   colour's intensity, and are pinned to `0000`: non-zero values change how
   the device reads the payload and can make it ignore colour updates
   entirely. Dim a streamed colour by scaling r/g/b instead.
 
-Writing DP 28 is what **enters** music mode. Do not set DP 21 to `"music"`
-first: that resets the bulb's colour before the first update lands, which
-shows up as a visible flicker at the start of every drag. To **exit**, do a
-normal DP 21/24 colour write (`Bulb.SetColour`) — it leaves music mode and
-persists the final colour in one step, whereas setting DP 21 back to
-`"colour"` alone reverts the bulb to its pre-stream colour.
+Write DP 28 alone. Do not set DP 21 first: that resets the bulb's colour
+before the first update lands, which shows up as a visible flicker at the
+start of every drag. DP 28 is not music mode (that is DP 21 `"music"` +
+DP 27, `SetMusicSync`); whether DP 28 changes the reported DP 21 has not
+been verified. To **finish**, do a normal DP 21/24 colour write
+(`Bulb.SetColour`) — it persists the final colour, whereas setting DP 21
+back to `"colour"` alone reverts the bulb to its pre-stream colour.
 
 The device acks only the **first** message of a streaming run, so every
 later send uses `wait=false`. Whatever it pushes meanwhile is read by the
@@ -299,7 +300,7 @@ NOTUYA_INTEGRATION=1 \
   over the fake device. It lives here because the fixture does.
 - `dp/dp_test.go`: Tuya's documented examples, tinytuya colour vectors,
   range rejection, legacy schema, decode of a real A60TY10W status.
-- `bulb/bulb_test.go`, `bulb/music_test.go`: verbs write the documented DPs;
+- `bulb/bulb_test.go`, `bulb/stream_test.go`: verbs write the documented DPs;
   streaming payload shape, coalescing, change-mode handling.
 - `discovery/discovery_test.go`: announcement parsing (retcode-prefixed,
   bare, own echo).
@@ -317,7 +318,7 @@ make fmt                         # gofmt -l .
 
 There is no cgo in any package.
 
-## Music mode
+## Live colour streaming
 
 `bulb.StreamColours` streams colours from a channel to one device over a
 persistent session, so an interactive picker can drive a bulb live. See
@@ -336,8 +337,7 @@ The flow:
 3. `Heartbeat` if nothing was sent for ~5s; a drag pauses whenever the
    pointer stops.
 4. On channel close or ctx cancel: flush the pending colour and return. The
-   caller then calls `SetColour` to leave music mode with the final colour
-   persisted.
+   caller then calls `SetColour` so the final colour is persisted.
 
 Known limitations: no reconnect if a device drops mid-stream (reported via
 `session.Done()`), and RGB only — no white-mode dragging.
