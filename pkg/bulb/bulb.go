@@ -105,10 +105,10 @@ func (b *Bulb) Set(ctx context.Context, vs dp.Values) error {
 
 func (b *Bulb) write(ctx context.Context, what string, vs dp.Values) error {
 	body, err := dp.Body(vs)
-	if err == nil {
-		err = b.sess.Control(ctx, body, true)
-	}
 	if err != nil {
+		return b.errorf(what, err)
+	}
+	if err := b.sess.Control(ctx, body, true); err != nil {
 		return b.errorf(what, err)
 	}
 	return nil
