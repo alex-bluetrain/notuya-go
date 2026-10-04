@@ -102,8 +102,11 @@ handshake and starts two goroutines:
   first in, first out. Seqno matching does not work because the device
   replies with its own seqno. It routes status pushes to `Pushes()`, which
   buffers 16 and drops the oldest rather than stall.
-- **The heartbeat.** It pings after `DefaultHeartbeatInterval` (10s) with
-  no writes.
+- **The heartbeat.** It pings fire-and-forget after
+  `DefaultHeartbeatInterval` (10s) with no writes, which keeps the link
+  alive (streams have no heartbeat of their own). A read or write error
+  fails the session and closes `Done()`; callers that want an active probe
+  send `Heartbeat(ctx, true)` and wait for the reply.
 
 All methods are safe for concurrent use.
 

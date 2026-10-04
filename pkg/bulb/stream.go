@@ -7,17 +7,10 @@ import (
 	"github.com/alex-bluetrain/notuya-go/pkg/dp"
 )
 
-const (
-	// DefaultStreamInterval throttles sends to ~25fps. Matches the sibling
-	// Python picker, where this was found to be the fastest rate the bulb
-	// keeps up with while dragging.
-	DefaultStreamInterval = 40 * time.Millisecond
-
-	// streamHeartbeatInterval bounds how long a stream stays silent. Tuya
-	// devices drop idle connections, and a drag naturally pauses whenever
-	// the user stops moving the pointer.
-	streamHeartbeatInterval = 5 * time.Second
-)
+// DefaultStreamInterval throttles sends to ~25fps. Matches the sibling
+// Python picker, where this was found to be the fastest rate the bulb keeps
+// up with while dragging.
+const DefaultStreamInterval = 40 * time.Millisecond
 
 // StreamOptions tunes a StreamColours run. The zero value is valid and
 // selects the defaults.
@@ -66,7 +59,8 @@ func (o StreamOptions) withDefaults() StreamOptions {
 // The bulb only acks the first message of a run, so sends never wait. The
 // session's reader goroutine absorbs whatever the bulb sends meanwhile, so
 // the session stays usable for ordinary commands during and after the
-// stream. Finish a stream with SetColour: it persists the final colour,
+// stream. A stream has no keep-alive of its own: when a drag pauses, the
+// session's idle heartbeat keeps the link open. Finish a stream with SetColour: it persists the final colour,
 // where setting DP 21 back to "colour" alone would instead revert the bulb
 // to the colour it had before the stream started.
 func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, opts StreamOptions) error {
@@ -102,10 +96,7 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, o
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
 
-	var (
-		pending  *StreamColour
-		lastSent = time.Now()
-	)
+	var pending *StreamColour
 
 	for {
 		select {
@@ -128,19 +119,13 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, o
 			pending = &c
 
 		case <-ticker.C:
-			switch {
-			case pending != nil:
-				c := *pending
-				pending = nil
-				if err := send(c); err != nil {
-					return err
-				}
-				lastSent = time.Now()
-			case time.Since(lastSent) >= streamHeartbeatInterval:
-				if err := b.sess.Heartbeat(ctx, false); err != nil {
-					return b.errorf("colour stream heartbeat", err)
-				}
-				lastSent = time.Now()
+			if pending == nil {
+				continue
+			}
+			c := *pending
+			pending = nil
+			if err := send(c); err != nil {
+				return err
 			}
 		}
 	}

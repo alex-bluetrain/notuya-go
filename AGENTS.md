@@ -65,9 +65,12 @@ consumer is the sibling `notuya-gui`, wired in dev with a gitignored
   replies to waiting requests by command code, FIFO (the device answers
   with its own seqno, so seqno matching does not work), and routes status
   pushes to `Pushes()` (buffer 16; the oldest is dropped rather than
-  stalling the reader). The **heartbeat** loop pings when nothing was
-  written for `DefaultHeartbeatInterval` (10s). All methods are safe for
-  concurrent use.
+  stalling the reader). The **heartbeat** loop pings fire-and-forget
+  when nothing was written for `DefaultHeartbeatInterval` (10s); it keeps
+  the link alive, including through stream pauses. A read or write error
+  fails the session and closes `Done()` — that is how a dead link shows up.
+  Waiting for a heartbeat reply (`Heartbeat(ctx, true)`) is the caller's
+  active probe. All methods are safe for concurrent use.
 - **`dp`** — the DP table (`Lookup`), codecs for every documented value
   (`HSV` for 24, `SceneValue` for 25, `Adjust` for 27/28/29, raw binary
   `Rhythm`/`FadeNode`/`PowerMemory`… for 30–33/209/210), `Schema` (`Schema20`
@@ -334,8 +337,8 @@ The flow:
    silently dropping colours.
 2. DP 28 via `session.Control(..., wait=false)`, throttled to
    `DefaultStreamInterval` (40ms) and coalesced newest-wins.
-3. `Heartbeat` if nothing was sent for ~5s; a drag pauses whenever the
-   pointer stops.
+3. No heartbeat of its own: when a drag pauses, the session's idle
+   heartbeat keeps the link alive.
 4. On channel close or ctx cancel: flush the pending colour and return. The
    caller then calls `SetColour` so the final colour is persisted.
 

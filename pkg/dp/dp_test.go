@@ -64,6 +64,26 @@ func TestHSVFromRGBMatchesTinytuya(t *testing.T) {
 	}
 }
 
+func TestHSVToRGB(t *testing.T) {
+	cases := []struct {
+		in   HSV
+		want RGB
+	}{
+		{HSV{0, 0, 1000}, RGB{255, 255, 255}},
+		{HSV{0, 1000, 1000}, RGB{255, 0, 0}},
+		{HSV{120, 1000, 1000}, RGB{0, 255, 0}},
+		{HSV{240, 1000, 1000}, RGB{0, 0, 255}},
+		{HSV{360, 1000, 1000}, RGB{255, 0, 0}}, // 360° wraps to red
+		{HSV{0, 0, 0}, RGB{0, 0, 0}},
+		{HSV{30, 1000, 500}, RGB{128, 64, 0}}, // rounds, not truncates
+	}
+	for _, c := range cases {
+		if got := c.in.RGB(); got != c.want {
+			t.Errorf("%+v.RGB() = %+v, want %+v", c.in, got, c.want)
+		}
+	}
+}
+
 func TestRealTimeStreamPayload(t *testing.T) {
 	v, err := Schema20.RealTime(Adjust{Mode: ChangeJump, Colour: HSVFromRGB(RGB{255, 0, 0})})
 	if err != nil {

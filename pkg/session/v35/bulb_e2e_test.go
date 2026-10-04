@@ -85,3 +85,33 @@ func TestBulbEndToEnd(t *testing.T) {
 		t.Fatalf("status after stream = %+v, %v", st, err)
 	}
 }
+
+// TestStreamPauseKeptAliveBySession pauses a stream for several session
+// heartbeat intervals with no colours sent. The stream has no keep-alive of
+// its own, so the session's idle heartbeat must cover the pause, and the
+// stream must still deliver the next colour afterwards.
+func TestStreamPauseKeptAliveBySession(t *testing.T) {
+	d := newFakeDevice(t)
+	d.silentControl = true
+	s := open(t, d, Options{HeartbeatInterval: 40 * time.Millisecond})
+	b := bulb.New(s, "pause")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	colours := make(chan bulb.StreamColour)
+	done := make(chan error, 1)
+	go func() {
+		done <- b.StreamColours(ctx, colours, bulb.StreamOptions{Interval: 5 * time.Millisecond})
+	}()
+
+	colours <- bulb.StreamColour{RGB: dp.RGB{R: 255}}
+	time.Sleep(200 * time.Millisecond) // a pointer held still mid-drag
+	colours <- bulb.StreamColour{RGB: dp.RGB{G: 255}}
+	close(colours)
+	if err := <-done; err != nil {
+		t.Fatalf("StreamColours after pause: %v", err)
+	}
+
+	d.waitFor(t, cmdControl, 2) // sends are fire-and-forget
+	d.waitFor(t, cmdHeartbeat, 1)
+}
