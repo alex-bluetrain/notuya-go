@@ -66,7 +66,6 @@ func (o StreamOptions) withDefaults() StreamOptions {
 // the stream started.
 func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, opts StreamOptions) error {
 	opts = opts.withDefaults()
-	schema := dp.Schema20
 
 	// Warm-up: a blocking round trip confirms the bulb is reachable and
 	// surfaces a dead session as an error here rather than as silently
@@ -80,15 +79,15 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, o
 		if c.ChangeMode != nil {
 			mode = *c.ChangeMode
 		}
-		vs, err := schema.RealTime(dp.Adjust{Mode: mode, Colour: dp.HSVFromRGB(c.RGB)})
-		var body []byte
-		if err == nil {
-			body, err = dp.Body(vs)
-		}
-		if err == nil {
-			err = b.sess.Control(ctx, body, false)
-		}
+		vs, err := dp.Schema20.RealTime(dp.Adjust{Mode: mode, Colour: dp.HSVFromRGB(c.RGB)})
 		if err != nil {
+			return b.errorf("streaming colour", err)
+		}
+		body, err := dp.Body(vs)
+		if err != nil {
+			return b.errorf("streaming colour", err)
+		}
+		if err := b.sess.Control(ctx, body, false); err != nil {
 			return b.errorf("streaming colour", err)
 		}
 		return nil

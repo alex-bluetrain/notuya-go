@@ -75,9 +75,10 @@ consumer is the sibling `notuya-gui`, wired in dev with a gitignored
 - **`dp`** — the DP table (`Lookup`), codecs for every documented value
   (`HSV` for 24, `SceneValue` for 25, `Adjust` for 27/28/29, raw binary
   `Rhythm`/`FadeNode`/`PowerMemory`… for 30–33/209/210), `Schema20` (the
-  standard DP 20+ set; older DP 1–8 bulbs are not supported), `Decode` into a typed `State`, and `Body` for the
-  control JSON. Every encoder validates the PRIMITIVES.md ranges, so an
-  out-of-range value never reaches the wire.
+  standard DP 20+ set; older DP 1–8 bulbs are not supported), `Decode`
+  into a typed `State`, and `Body` for the control JSON. Every encoder
+  validates the PRIMITIVES.md ranges, so an out-of-range value never reaches
+  the wire.
 - **`bulb`** — domain verbs (`TurnOn`, `SetColour`, `SetWhiteBrightness`,
   `SetColourTempPercent`, `SetScene`, `SetTimer`, `SetDoNotDisturb`,
   `SetMusicSync`), `Status`/`Capabilities`/`Refresh`, `Watch` (pushes decoded
@@ -111,7 +112,8 @@ source code (not against third-party documentation).
 
 ### 6699 framing
 
-- Header: `prefix(0x00006699, 4) + unknown(2) + seqno(4) + cmd(4) + length(4)` = 18 bytes.
+- Header (18 bytes):
+  `prefix(0x00006699, 4) + unknown(2) + seqno(4) + cmd(4) + length(4)`.
 - Body: `IV(12) || ciphertext_GCM || tag(16)`.
 - Suffix: `0x00009966` (4 bytes).
 - GCM AAD = the 14 header bytes after the prefix.
@@ -119,17 +121,24 @@ source code (not against third-party documentation).
 
 ### Session handshake (3 messages)
 
-1. **Client → Device** (cmd 3): `local_nonce` (16 random bytes), encrypted with `local_key`.
-2. **Device → Client** (cmd 4): `remote_nonce(16) || HMAC-SHA256(local_key, local_nonce)(32)`. Verify the HMAC before continuing.
-3. **Client → Device** (cmd 5): `HMAC-SHA256(local_key, remote_nonce)(32)`. No device response.
-4. **Derivation**: `xor(local_nonce, remote_nonce)` → AES-GCM-seal with `local_key` and `iv=local_nonce[:12]` → take the 16 ciphertext bytes (discard the tag) = session key.
+1. **Client → Device** (cmd 3): `local_nonce` (16 random bytes),
+   encrypted with `local_key`.
+2. **Device → Client** (cmd 4):
+   `remote_nonce(16) || HMAC-SHA256(local_key, local_nonce)(32)`. Verify
+   the HMAC before continuing.
+3. **Client → Device** (cmd 5): `HMAC-SHA256(local_key, remote_nonce)(32)`.
+   No device response.
+4. **Derivation**: `xor(local_nonce, remote_nonce)` → AES-GCM-seal with
+   `local_key` and `iv=local_nonce[:12]` → the 16 ciphertext bytes
+   (discard the tag) are the session key.
 
 All subsequent traffic uses the derived session key, not the static
 `local_key`.
 
 ### Version prefix
 
-- `CONTROL_NEW` (0x0d): carries a `"3.5" + 12×0x00` prefix (15 bytes) before the JSON, before encrypting.
+- `CONTROL_NEW` (0x0d): carries a `"3.5" + 12×0x00` prefix (15 bytes)
+  before the JSON, before encrypting.
 - `DP_QUERY_NEW` (0x10), `HEART_BEAT`, handshake (cmd 3/4/5): **no** prefix.
 
 ### Commands
@@ -163,15 +172,16 @@ inside the control JSON: `{"20":true,"21":"colour","24":"016903e803e8"}`.
 
 Tuya calls DP 28 `control_data` ("real-time adjustment"); DP 27
 `music_data` takes the same payload. Streaming uses DP 28
-(`dp.Schema.RealTime`). A 21-character ASCII hex string: `change_mode(1) + hsv16(12) +
-white_brightness(4) + colourtemp(4)`. E.g. pure red with jump is
-`"0000003e803e800000000"`.
+(`dp.Schema.RealTime`). It is a 21-character ASCII hex string:
+`change_mode(1) + hsv16(12) + white_brightness(4) + colourtemp(4)`. E.g.
+pure red with jump is `"0000003e803e800000000"`.
 
 - `change_mode` is a **two-valued flag**, typed as `dp.ChangeMode`:
   `ChangeJump` (0, Tuya's "direct") or `ChangeFade` (1, "gradient"). No
   other digit is defined; the fade's duration is fixed by the firmware, so
-  drag smoothness is tuned via the send interval. This is the whole point of DP 28 — DP 24 always applies
-  the device's own ~300-500ms fade, which makes a live colour drag lag.
+  drag smoothness is tuned via the send interval. Jump is the whole point
+  of DP 28: DP 24 always applies the device's own ~300-500ms fade, which
+  makes a live colour drag lag.
 - The two trailing fields drive the **separate white channel**, not the
   colour's intensity, and are pinned to `0000`: non-zero values change how
   the device reads the payload and can make it ignore colour updates
@@ -193,13 +203,15 @@ blocking commands can run on the same session during and after a stream.
 ### Control payloads
 
 - **Query**: cmd `DP_QUERY_NEW`(0x10), payload = `{}` (no version prefix).
-- **Set**: cmd `CONTROL_NEW`(0x0d), payload = `{"protocol":5,"t":<unix>,"data":{"dps":{"<dp>":<value>,...}}}`, **with** the version prefix.
+- **Set**: cmd `CONTROL_NEW`(0x0d), **with** the version prefix, payload =
+  `{"protocol":5,"t":<unix>,"data":{"dps":{"<dp>":<value>,...}}}`.
 
 ## Discovery
 
 - Fixed key (not the `local_key`): `md5("yGAdlopoPVldABfn")` (16 bytes).
 - Unsolicited: listen on UDP/6667, 6699 frames with the fixed key.
-- Solicited: broadcast `{"from":"app","ip":"<my-ip>"}` as a 6699 frame (cmd `REQ_DEVINFO=0x25`) to UDP/7000.
+- Solicited: broadcast `{"from":"app","ip":"<my-ip>"}` as a 6699 frame
+  (cmd `REQ_DEVINFO=0x25`) to UDP/7000.
 
 Four things the scanner gets wrong if written naively — each one produced
 an empty scan that looked exactly like a network limitation:
@@ -230,13 +242,15 @@ an empty scan that looked exactly like a network limitation:
 ## Code conventions
 
 - **Go 1.23**, module `github.com/alex-bluetrain/notuya-go`.
-- **Zero external dependencies** — everything with the stdlib (`crypto/aes`, `crypto/cipher`, `crypto/hmac`, `crypto/sha256`, `crypto/md5`, `encoding/binary`, `encoding/json`).
+- **Zero external dependencies** — everything with the stdlib
+  (`crypto/aes`, `crypto/cipher`, `crypto/hmac`, `crypto/sha256`,
+  `crypto/md5`, `encoding/binary`, `encoding/json`).
 - Deadlines are set per call from the call's context, on `transport/v35.Conn`.
   A session outlives the short context that opened it, so `Open` clears the
   handshake deadline before returning. Getting this wrong once killed
   streams ~10s in, silently.
-- Warm-up with `Status()` (a throwaway query) before the real command — mirrors `ctl.py`'s pattern.
-- Color conversion: an exact port of Python's `colorsys.rgb_to_hsv`, with truncation (not rounding) for bit-for-bit parity with tinytuya.
+- Colour conversion: an exact port of Python's `colorsys.rgb_to_hsv`, with
+  truncation (not rounding) for bit-for-bit parity with tinytuya.
 
 ## Decisions taken against tinytuya
 
@@ -287,13 +301,16 @@ go test -race ./pkg/session/... ./pkg/bulb   # the concurrent paths
 NOTUYA_INTEGRATION=1 \
   NOTUYA_TEST_IP=<ip> \
   NOTUYA_TEST_KEY=<key> \
-  go test ./... -v               # integration tests (requires a bulb on the LAN)
+  go test ./... -v               # integration tests (needs a LAN bulb)
 ```
 
 - `layers_test.go`: the layering rules above.
-- `transport/v35/frame_test.go`: frame round-trip, corruption rejection, retcode handling.
-- `transport/udp/udp_test.go`: discovery key, unique broadcast targets, encrypted and plaintext announcements.
-- `session/v35/handshake_test.go`: byte-identical handshake against `testdata/handshake/session1.json`.
+- `transport/v35/frame_test.go`: frame round-trip, corruption rejection,
+  retcode handling.
+- `transport/udp/udp_test.go`: discovery key, unique broadcast targets,
+  encrypted and plaintext announcements.
+- `session/v35/handshake_test.go`: byte-identical handshake against
+  `testdata/handshake/session1.json`.
 - `session/v35/session_test.go`: against `fakedevice_test.go`, an in-process
   device speaking the real handshake over TCP — concurrent Query/Control,
   pushes during a fire-and-forget stream, Refresh, idle heartbeat, full push
@@ -307,7 +324,8 @@ NOTUYA_INTEGRATION=1 \
   streaming payload shape, coalescing, change-mode handling.
 - `discovery/discovery_test.go`: announcement parsing (retcode-prefixed,
   bare, own echo).
-- `bulb/bulb_integration_test.go`: real hardware, gated behind `NOTUYA_INTEGRATION`.
+- `bulb/bulb_integration_test.go`: real hardware, gated behind
+  `NOTUYA_INTEGRATION`.
 
 ## Build
 
@@ -339,8 +357,9 @@ The flow:
    `DefaultStreamInterval` (40ms) and coalesced newest-wins.
 3. No heartbeat of its own: when a drag pauses, the session's idle
    heartbeat keeps the link alive.
-4. On channel close or ctx cancel: flush the pending colour and return. The
-   caller then calls `SetColour` so the final colour is persisted.
+4. On channel close: flush the pending colour and return; the caller then
+   calls `SetColour` so the final colour is persisted. On ctx cancel:
+   return at once (a send would fail on the cancelled context anyway).
 
 Known limitations: no reconnect if a device drops mid-stream (reported via
 `session.Done()`), and RGB only — no white-mode dragging.
