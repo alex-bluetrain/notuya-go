@@ -113,9 +113,6 @@ func TestRangesAreEnforced(t *testing.T) {
 		{"interval 101", err2(Schema20.Scene(SceneValue{1, []SceneUnit{{Interval: 101}}}))},
 		{"transition 3", err2(Schema20.Scene(SceneValue{1, []SceneUnit{{Transition: 3}}}))},
 		{"empty scene", err2(Schema20.Scene(SceneValue{ID: 1}))},
-		{"legacy brightness 24", err2(Schema1.White(24))},
-		{"legacy temp 256", err2(Schema1.ColourTemp(256))},
-		{"legacy scene", err2(Schema1.Scene(SceneValue{1, []SceneUnit{{}}}))},
 		{"not raw", err2(Schema20.Raw(Brightness, nil))},
 	}
 	for _, b := range bad {
@@ -126,7 +123,6 @@ func TestRangesAreEnforced(t *testing.T) {
 	for _, ok := range []error{
 		err2(Schema20.White(10)), err2(Schema20.White(1000)),
 		err2(Schema20.ColourTemp(0)), err2(Schema20.Timer(0)),
-		err2(Schema1.White(25)), err2(Schema1.White(255)),
 	} {
 		if ok != nil {
 			t.Errorf("boundary rejected: %v", ok)
@@ -142,9 +138,6 @@ func TestWhitePercentClampsToMinimum(t *testing.T) {
 		if err != nil || v[Brightness] != want || v[Mode] != "white" {
 			t.Errorf("WhitePercent(%g) = %v, %v; want brightness %d", pct, v, err, want)
 		}
-	}
-	if v, _ := Schema1.WhitePercent(0); v[3] != 25 {
-		t.Errorf("legacy WhitePercent(0) = %v", v)
 	}
 }
 
@@ -176,7 +169,7 @@ func TestDecodeQueryReply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Schema.Legacy || !st.On || st.Mode != ModeColour || st.Brightness != 1000 ||
+	if !st.On || st.Mode != ModeColour || st.Brightness != 1000 ||
 		st.Colour != (HSV{0, 1000, 1000}) || st.Scene.ID != 0 || st.Has(Control) {
 		t.Errorf("state = %+v", st)
 	}
@@ -198,20 +191,6 @@ func TestDecodePushAndSpellings(t *testing.T) {
 	}
 	if _, err := Decode([]byte(`{"dps":{"22":"high"}}`)); err == nil {
 		t.Error("bad brightness type accepted")
-	}
-}
-
-func TestLegacySchema(t *testing.T) {
-	st, err := Decode([]byte(`{"dps":{"1":true,"2":"colour","3":255,"5":"ff00000000ffff"}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !st.Schema.Legacy || !st.On || st.Brightness != 255 || st.Colour != (HSV{0, 1000, 1000}) {
-		t.Errorf("legacy state = %+v", st)
-	}
-	v := Schema1.Colour(RGB{255, 0, 0})
-	if !reflect.DeepEqual(v, Values{2: "colour", 5: "ff00000000ffff"}) {
-		t.Errorf("legacy colour = %v", v)
 	}
 }
 

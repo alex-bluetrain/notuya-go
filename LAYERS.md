@@ -105,8 +105,9 @@ handshake and starts two goroutines:
 - **The heartbeat.** It pings fire-and-forget after
   `DefaultHeartbeatInterval` (10s) with no writes, which keeps the link
   alive (streams have no heartbeat of their own). A read or write error
-  fails the session and closes `Done()`; callers that want an active probe
-  send `Heartbeat(ctx, true)` and wait for the reply.
+  fails the session and closes `Done()`. A bulb that loses power never
+  errors the socket, though: only a waited `Heartbeat(ctx, true)` timing
+  out reveals it, and the caller has to send it.
 
 All methods are safe for concurrent use.
 
@@ -130,8 +131,8 @@ pure: no I/O, no goroutines.
   | 33 power memory | `PowerMemoryValue` |
   | 209, 210 cycle/vacation timing | `TimingNode` |
 
-- `Schema`: `Schema20` (DP 20+) or the legacy `Schema1` (DP 1–8), picked by
-  `DetectSchema`. A bulb never mixes the two. Its methods return `Values`:
+- `Schema`: `Schema20`, the standard DP 20+ set (older DP 1–8 bulbs are not
+  supported). Its methods return `Values`:
   `Power`, `Colour`, `ColourHSV`, `White`, `WhitePercent`, `ColourTemp`,
   `ColourTempPercent`, `Scene`, `Timer`, `RealTime`, `MusicSync`,
   `DoNotDisturb`, `Raw`.

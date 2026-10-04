@@ -4,8 +4,7 @@
 // bodies it builds and reads are carried by pkg/session.
 //
 // The source for everything here is PRIMITIVES.md (Tuya's "Function
-// Definition of Lighting Products" page, plus tinytuya for the legacy DP
-// 1–8 set).
+// Definition of Lighting Products" page).
 package dp
 
 import "strconv"
@@ -98,7 +97,7 @@ func Lookup(id ID) (Info, bool) {
 // TimerMax is the longest countdown, in seconds (shown as 23:59).
 const TimerMax = 86400
 
-// WorkMode is a DP 21 (or legacy DP 2) value.
+// WorkMode is a DP 21 value.
 type WorkMode string
 
 const (

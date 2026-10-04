@@ -17,7 +17,7 @@ import (
 // Ports used by discovery.
 const (
 	AnnouncePort      = 6667 // devices broadcast their presence here periodically
-	AnnouncePortPlain = 6666 // legacy, unencrypted announcements
+	AnnouncePortPlain = 6666 // older firmware: plaintext announcements
 	SolicitPort       = 7000 // "app" solicitation and the device replies
 )
 

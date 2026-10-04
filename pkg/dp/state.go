@@ -53,7 +53,7 @@ func (st State) ColourTempPercent() float64 {
 }
 
 // Decode parses a status body: a query reply ({"dps":{...}}) or a push
-// ({"data":{"dps":{...}}}). It picks the schema from the DPs present.
+// ({"data":{"dps":{...}}}), using Schema20.
 //
 // A DP whose value does not parse is an error: the bulb said something this
 // package misunderstands, and silently ignoring it would hide that.
@@ -79,7 +79,7 @@ func Decode(body []byte) (State, error) {
 		}
 		st.Raw[ID(n)] = v
 	}
-	st.Schema = DetectSchema(st)
+	st.Schema = Schema20
 	s := st.Schema
 
 	var err error
@@ -97,20 +97,14 @@ func Decode(body []byte) (State, error) {
 	field(s.ColourTempDP, &st.ColourTemp)
 	field(s.ColourDP, &colour)
 	field(s.TimerDP, &st.Timer)
-	if !s.Legacy {
-		field(s.SceneDP, &scene)
-		field(DoNotDisturb, &st.DoNotDisturb)
-	}
+	field(s.SceneDP, &scene)
+	field(DoNotDisturb, &st.DoNotDisturb)
 	if err != nil {
 		return State{}, err
 	}
 	st.Mode = ParseMode(mode)
 	if colour != "" {
-		if s.Legacy {
-			st.Colour, err = parseLegacyColour(colour)
-		} else {
-			st.Colour, err = ParseHSV(colour)
-		}
+		st.Colour, err = ParseHSV(colour)
 	}
 	if err == nil && scene != "" {
 		st.Scene, err = ParseScene(scene)

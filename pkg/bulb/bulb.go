@@ -3,7 +3,6 @@ package bulb
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/alex-bluetrain/notuya-go/pkg/dp"
 	"github.com/alex-bluetrain/notuya-go/pkg/session"
@@ -17,43 +16,21 @@ import (
 type Bulb struct {
 	Name string
 	sess session.Session
-
-	mu     sync.Mutex
-	schema dp.Schema
 }
 
-// New wraps an open session. The bulb is assumed to use the standard DP
-// 20+ schema until a status read says otherwise; call Status first when
-// legacy (DP 1–8) bulbs are possible.
+// New wraps an open session.
 func New(sess session.Session, name string) *Bulb {
-	return &Bulb{Name: name, sess: sess, schema: dp.Schema20}
+	return &Bulb{Name: name, sess: sess}
 }
 
 // Session returns the session the bulb was created with.
 func (b *Bulb) Session() session.Session { return b.sess }
 
-// Schema returns the DP schema used for writes.
-func (b *Bulb) Schema() dp.Schema {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.schema
-}
-
-func (b *Bulb) learn(st dp.State) {
-	if len(st.Raw) == 0 {
-		return
-	}
-	b.mu.Lock()
-	b.schema = st.Schema
-	b.mu.Unlock()
-}
-
 func (b *Bulb) errorf(what string, err error) error {
 	return fmt.Errorf("bulb: %s: %s: %w", b.Name, what, err)
 }
 
-// Status queries the bulb's current state. It also selects the DP schema
-// subsequent writes use.
+// Status queries the bulb's current state.
 func (b *Bulb) Status(ctx context.Context) (dp.State, error) {
 	body, err := b.sess.Query(ctx)
 	if err != nil {
@@ -63,7 +40,6 @@ func (b *Bulb) Status(ctx context.Context) (dp.State, error) {
 	if err != nil {
 		return dp.State{}, b.errorf("status", err)
 	}
-	b.learn(st)
 	return st, nil
 }
 
@@ -124,14 +100,11 @@ func (b *Bulb) Watch(ctx context.Context) <-chan dp.State {
 // Set writes vs and waits for the bulb to acknowledge. It is the escape
 // hatch for DPs the named methods do not cover.
 func (b *Bulb) Set(ctx context.Context, vs dp.Values) error {
-	return b.write(ctx, "set", vs, nil)
+	return b.write(ctx, "set", vs)
 }
 
-func (b *Bulb) write(ctx context.Context, what string, vs dp.Values, err error) error {
-	var body []byte
-	if err == nil {
-		body, err = dp.Body(vs)
-	}
+func (b *Bulb) write(ctx context.Context, what string, vs dp.Values) error {
+	body, err := dp.Body(vs)
 	if err == nil {
 		err = b.sess.Control(ctx, body, true)
 	}
@@ -143,62 +116,83 @@ func (b *Bulb) write(ctx context.Context, what string, vs dp.Values, err error) 
 
 // TurnOn switches the bulb on.
 func (b *Bulb) TurnOn(ctx context.Context) error {
-	return b.write(ctx, "turn on", b.Schema().Power(true), nil)
+	return b.write(ctx, "turn on", dp.Schema20.Power(true))
 }
 
 // TurnOff switches the bulb off.
 func (b *Bulb) TurnOff(ctx context.Context) error {
-	return b.write(ctx, "turn off", b.Schema().Power(false), nil)
+	return b.write(ctx, "turn off", dp.Schema20.Power(false))
 }
 
 // SetColour switches to colour mode with c. It also ends a colour stream,
 // persisting c as the bulb's colour.
 func (b *Bulb) SetColour(ctx context.Context, c dp.RGB) error {
-	return b.write(ctx, "set colour", b.Schema().Colour(c), nil)
+	return b.write(ctx, "set colour", dp.Schema20.Colour(c))
 }
 
 // SetColourHSV switches to colour mode with c.
 func (b *Bulb) SetColourHSV(ctx context.Context, c dp.HSV) error {
-	vs, err := b.Schema().ColourHSV(c)
-	return b.write(ctx, "set colour", vs, err)
+	vs, err := dp.Schema20.ColourHSV(c)
+	if err != nil {
+		return b.errorf("set colour", err)
+	}
+	return b.write(ctx, "set colour", vs)
 }
 
 // SetWhiteBrightness switches to white mode at pct (0–100 %; values below
 // the bulb's 1 % minimum clamp up to it).
 func (b *Bulb) SetWhiteBrightness(ctx context.Context, pct float64) error {
-	vs, err := b.Schema().WhitePercent(pct)
-	return b.write(ctx, "set white brightness", vs, err)
+	vs, err := dp.Schema20.WhitePercent(pct)
+	if err != nil {
+		return b.errorf("set white brightness", err)
+	}
+	return b.write(ctx, "set white brightness", vs)
 }
 
 // SetColourTempPercent switches to white mode with the colour temperature
 // at pct (0 % warmest, 100 % coolest).
 func (b *Bulb) SetColourTempPercent(ctx context.Context, pct float64) error {
-	vs, err := b.Schema().ColourTempPercent(pct)
-	return b.write(ctx, "set colour temp", vs, err)
+	vs, err := dp.Schema20.ColourTempPercent(pct)
+	if err != nil {
+		return b.errorf("set colour temp", err)
+	}
+	return b.write(ctx, "set colour temp", vs)
 }
 
 // SetScene switches to scene mode and plays sc.
 func (b *Bulb) SetScene(ctx context.Context, sc dp.SceneValue) error {
-	vs, err := b.Schema().Scene(sc)
-	return b.write(ctx, "set scene", vs, err)
+	vs, err := dp.Schema20.Scene(sc)
+	if err != nil {
+		return b.errorf("set scene", err)
+	}
+	return b.write(ctx, "set scene", vs)
 }
 
 // SetTimer starts the countdown (seconds, 0 cancels) after which the bulb
 // toggles on/off.
 func (b *Bulb) SetTimer(ctx context.Context, seconds int) error {
-	vs, err := b.Schema().Timer(seconds)
-	return b.write(ctx, "set timer", vs, err)
+	vs, err := dp.Schema20.Timer(seconds)
+	if err != nil {
+		return b.errorf("set timer", err)
+	}
+	return b.write(ctx, "set timer", vs)
 }
 
 // SetDoNotDisturb turns the do-not-disturb (power-outage memory guard) on
 // or off.
 func (b *Bulb) SetDoNotDisturb(ctx context.Context, on bool) error {
-	vs, err := b.Schema().DoNotDisturb(on)
-	return b.write(ctx, "set do not disturb", vs, err)
+	vs, err := dp.Schema20.DoNotDisturb(on)
+	if err != nil {
+		return b.errorf("set do not disturb", err)
+	}
+	return b.write(ctx, "set do not disturb", vs)
 }
 
 // SetMusicSync writes one DP 27 ("music sync") value.
 func (b *Bulb) SetMusicSync(ctx context.Context, a dp.Adjust) error {
-	vs, err := b.Schema().MusicSync(a)
-	return b.write(ctx, "set music sync", vs, err)
+	vs, err := dp.Schema20.MusicSync(a)
+	if err != nil {
+		return b.errorf("set music sync", err)
+	}
+	return b.write(ctx, "set music sync", vs)
 }

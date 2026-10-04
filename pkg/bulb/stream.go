@@ -60,12 +60,13 @@ func (o StreamOptions) withDefaults() StreamOptions {
 // session's reader goroutine absorbs whatever the bulb sends meanwhile, so
 // the session stays usable for ordinary commands during and after the
 // stream. A stream has no keep-alive of its own: when a drag pauses, the
-// session's idle heartbeat keeps the link open. Finish a stream with SetColour: it persists the final colour,
-// where setting DP 21 back to "colour" alone would instead revert the bulb
-// to the colour it had before the stream started.
+// session's idle heartbeat keeps the link open. Finish a stream with
+// SetColour: it persists the final colour, where setting DP 21 back to
+// "colour" alone would instead revert the bulb to the colour it had before
+// the stream started.
 func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, opts StreamOptions) error {
 	opts = opts.withDefaults()
-	schema := b.Schema()
+	schema := dp.Schema20
 
 	// Warm-up: a blocking round trip confirms the bulb is reachable and
 	// surfaces a dead session as an error here rather than as silently

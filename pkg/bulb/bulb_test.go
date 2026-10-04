@@ -158,25 +158,6 @@ func TestOutOfRangeNeverReachesTheWire(t *testing.T) {
 	}
 }
 
-func TestStatusSelectsLegacySchema(t *testing.T) {
-	m := newMock()
-	m.queryResp = `{"dps":{"1":true,"2":"white","3":200}}`
-	b := New(m, "t")
-	st, err := b.Status(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !st.Schema.Legacy || st.Brightness != 200 {
-		t.Fatalf("state = %+v", st)
-	}
-	if err := b.TurnOn(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if got := lastControl(t, m); got["1"] != true {
-		t.Errorf("legacy bulb power write = %v, want DP 1", got)
-	}
-}
-
 func TestCapabilities(t *testing.T) {
 	ids, err := New(newMock(), "t").Capabilities(context.Background())
 	if err != nil {

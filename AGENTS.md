@@ -68,14 +68,14 @@ consumer is the sibling `notuya-gui`, wired in dev with a gitignored
   stalling the reader). The **heartbeat** loop pings fire-and-forget
   when nothing was written for `DefaultHeartbeatInterval` (10s); it keeps
   the link alive, including through stream pauses. A read or write error
-  fails the session and closes `Done()` — that is how a dead link shows up.
-  Waiting for a heartbeat reply (`Heartbeat(ctx, true)`) is the caller's
-  active probe. All methods are safe for concurrent use.
+  fails the session and closes `Done()`, but a bulb that loses power never
+  errors the socket: only a waited `Heartbeat(ctx, true)` timing out
+  reveals it, and the caller has to send it. All methods are safe for
+  concurrent use.
 - **`dp`** — the DP table (`Lookup`), codecs for every documented value
   (`HSV` for 24, `SceneValue` for 25, `Adjust` for 27/28/29, raw binary
-  `Rhythm`/`FadeNode`/`PowerMemory`… for 30–33/209/210), `Schema` (`Schema20`
-  or legacy `Schema1`, picked by `DetectSchema`, never mixed — tinytuya's
-  either/or rule), `Decode` into a typed `State`, and `Body` for the
+  `Rhythm`/`FadeNode`/`PowerMemory`… for 30–33/209/210), `Schema20` (the
+  standard DP 20+ set; older DP 1–8 bulbs are not supported), `Decode` into a typed `State`, and `Body` for the
   control JSON. Every encoder validates the PRIMITIVES.md ranges, so an
   out-of-range value never reaches the wire.
 - **`bulb`** — domain verbs (`TurnOn`, `SetColour`, `SetWhiteBrightness`,
@@ -300,9 +300,10 @@ NOTUYA_INTEGRATION=1 \
   pushes during a fire-and-forget stream, Refresh, idle heartbeat, full push
   buffer, disconnect, wrong key.
 - `session/v35/bulb_e2e_test.go`: `bulb.StreamColours` + `Watch` end-to-end
-  over the fake device. It lives here because the fixture does.
+  over the fake device, and a paused stream kept alive by the session's idle
+  heartbeat. It lives here because the fixture does.
 - `dp/dp_test.go`: Tuya's documented examples, tinytuya colour vectors,
-  range rejection, legacy schema, decode of a real A60TY10W status.
+  range rejection, decode of a real A60TY10W status.
 - `bulb/bulb_test.go`, `bulb/stream_test.go`: verbs write the documented DPs;
   streaming payload shape, coalescing, change-mode handling.
 - `discovery/discovery_test.go`: announcement parsing (retcode-prefixed,
@@ -325,7 +326,7 @@ There is no cgo in any package.
 
 `bulb.StreamColours` streams colours from a channel to one device over a
 persistent session, so an interactive picker can drive a bulb live. See
-*DP 28* above for the wire format and the mode entry/exit rules.
+*DP 28* above for the wire format.
 
 Each `bulb.StreamColour` is a `dp.RGB` plus an optional `*dp.ChangeMode`; nil
 falls back to `StreamOptions.ChangeMode`. Pointers because `ChangeJump` is
