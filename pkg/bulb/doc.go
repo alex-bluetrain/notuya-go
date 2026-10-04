@@ -1,8 +1,8 @@
-// Package bulb is the high-level business surface for one Tuya bulb —
-// TurnOn, TurnOff, SetColour, SetWhiteBrightness,
-// Status, and the
-// music-mode colour streaming loop. It is built on top of device.Device
-// (the low-level, DP-centric layer), the way the sibling Python project's
-// ctl.py / picker.py drive tinytuya's BulbDevice. Callers that need a DP
-// not covered here can reach the underlying Device via Raw().
+// Package bulb is the application layer for one Tuya bulb: domain verbs
+// (TurnOn, SetColour, SetWhiteBrightness, SetScene, SetTimer, …), status
+// and capabilities, pushed state changes (Watch), and the colour streaming
+// loop. It is built on a session.Session for messaging and pkg/dp for DP
+// encoding; it never names a message code or a DP number itself.
+//
+// Set writes arbitrary dp.Values for DPs the named methods do not cover.
 package bulb

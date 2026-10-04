@@ -2,339 +2,119 @@ package bulb
 
 import (
 	"context"
-	"encoding/json"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/alex-bluetrain/notuya-go/pkg/device"
-	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/dp"
 )
 
-// streamCall is one recorded Command invocation.
-type streamCall struct {
-	cmd     uint32
-	payload []byte
-	wait    bool
-}
-
-// mockStreamSession is a protocol.StreamSession that records every Command
-// and blocks in DrainInbound until its context is cancelled, the way a real
-// session does on an idle connection.
-type mockStreamSession struct {
-	mu    sync.Mutex
-	calls []streamCall
-
-	drainStarted  chan struct{}
-	drainReturned chan struct{}
-	queryResp     []byte
-}
-
-func newMockStreamSession() *mockStreamSession {
-	return &mockStreamSession{
-		drainStarted:  make(chan struct{}, 1),
-		drainReturned: make(chan struct{}, 1),
-		queryResp:     []byte(`{"dps":{"20":true}}`),
-	}
-}
-
-func (m *mockStreamSession) Open(context.Context) error { return nil }
-func (m *mockStreamSession) Close() error               { return nil }
-
-func (m *mockStreamSession) Command(_ context.Context, cmd uint32, payload []byte, wait bool) ([]byte, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.calls = append(m.calls, streamCall{cmd: cmd, payload: append([]byte(nil), payload...), wait: wait})
-	if cmd == protocol.DPQueryNew {
-		return m.queryResp, nil
-	}
-	return nil, nil
-}
-
-func (m *mockStreamSession) DrainInbound(ctx context.Context) error {
-	select {
-	case m.drainStarted <- struct{}{}:
-	default:
-	}
-	<-ctx.Done()
-	select {
-	case m.drainReturned <- struct{}{}:
-	default:
-	}
-	return nil
-}
-
-func (m *mockStreamSession) recorded() []streamCall {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]streamCall(nil), m.calls...)
-}
-
-// nonStreamSession is a protocol.Session with no streaming support.
-type nonStreamSession struct{}
-
-func (nonStreamSession) Open(context.Context) error { return nil }
-func (nonStreamSession) Close() error               { return nil }
-func (nonStreamSession) Command(context.Context, uint32, []byte, bool) ([]byte, error) {
-	return []byte(`{"dps":{"20":true}}`), nil
-}
-
-// musicDPSFromPayload extracts data.dps from a recorded CONTROL_NEW payload,
-// skipping the 15-byte version header.
-func musicDPSFromPayload(t *testing.T, payload []byte) map[string]any {
+// adjustHex is the DP 28 value expected for a colour sent with mode.
+func adjustHex(t *testing.T, mode dp.ChangeMode, c dp.RGB) string {
 	t.Helper()
-	if len(payload) < 15 {
-		t.Fatalf("payload too short (%d bytes) for version header", len(payload))
+	h, err := dp.Adjust{Mode: mode, Colour: dp.HSVFromRGB(c)}.Hex()
+	if err != nil {
+		t.Fatal(err)
 	}
-	var body struct {
-		Data struct {
-			DPS map[string]any `json:"dps"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(payload[15:], &body); err != nil {
-		t.Fatalf("parsing control payload: %v", err)
-	}
-	return body.Data.DPS
+	return h
 }
 
-// musicColourHex reconstructs the expected DP 28 value for assertions,
-// mirroring device.SetMusicColour's encoding.
-func musicColourHexRef(t *testing.T, mode device.ChangeMode, r, g, b uint8) string {
+func stream(t *testing.T, m *mockSession, cs []StreamColour, opts StreamOptions) {
 	t.Helper()
-	mock := newMockStreamSession()
-	d := device.NewDevice(mock, "ref")
-	if err := d.SetMusicColour(context.Background(), mode, r, g, b, false); err != nil {
-		t.Fatalf("SetMusicColour: %v", err)
+	colours := make(chan StreamColour, len(cs))
+	for _, c := range cs {
+		colours <- c
 	}
-	dps := musicDPSFromPayload(t, mock.recorded()[0].payload)
-	s, ok := dps[device.DPMusic].(string)
-	if !ok {
-		t.Fatalf("reference DP %s missing or not a string: %v", device.DPMusic, dps)
+	close(colours)
+	if opts.Interval <= 0 {
+		opts.Interval = time.Millisecond
 	}
-	return s
+	if err := New(m, "t").StreamColours(context.Background(), colours, opts); err != nil {
+		t.Fatalf("StreamColours: %v", err)
+	}
 }
 
 // TestStreamColoursHonoursJump guards the reason ChangeMode is a pointer:
 // its zero value (ChangeJump) is a meaningful setting, so it must reach the
 // wire instead of being read as "unset" and replaced by the default (fade).
 func TestStreamColoursHonoursJump(t *testing.T) {
-	mock := newMockStreamSession()
-	b := NewBulb(mock, "test")
-
-	colours := make(chan StreamColour, 1)
-	colours <- StreamColour{RGB: device.RGB{R: 255}}
-	close(colours)
-
-	err := b.StreamColours(context.Background(), colours, StreamOptions{
-		Interval:   time.Millisecond,
-		ChangeMode: device.ChangeJump.Ptr(),
-	})
-	if err != nil {
-		t.Fatalf("StreamColours: %v", err)
-	}
-
-	calls := mock.recorded()
-	last := calls[len(calls)-1]
-	dps := musicDPSFromPayload(t, last.payload)
-	got := dps[device.DPMusic]
-	want := musicColourHexRef(t, device.ChangeJump, 255, 0, 0)
-	if got != want {
-		t.Errorf("DP %s = %q, want %q (jump must survive)", device.DPMusic, got, want)
+	m := newMock()
+	stream(t, m, []StreamColour{{RGB: dp.RGB{R: 255}}}, StreamOptions{ChangeMode: dp.ChangeJump.Ptr()})
+	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeJump, dp.RGB{R: 255}); got != want {
+		t.Errorf("DP 28 = %v, want %q (jump must survive)", got, want)
 	}
 }
 
 // TestStreamColoursPayloadShape checks the on-the-wire shape of a stream:
-// a blocking warm-up query first, then DP 28 writes that must not wait.
+// a blocking warm-up query first, then DP 28 writes that do not wait and
+// never touch the mode DP.
 func TestStreamColoursPayloadShape(t *testing.T) {
-	mock := newMockStreamSession()
-	b := NewBulb(mock, "test")
+	m := newMock()
+	stream(t, m, []StreamColour{{RGB: dp.RGB{R: 255}}}, StreamOptions{ChangeMode: dp.ChangeFade.Ptr()})
 
-	colours := make(chan StreamColour, 1)
-	colours <- StreamColour{RGB: device.RGB{R: 255}}
-	close(colours)
-
-	err := b.StreamColours(context.Background(), colours, StreamOptions{
-		Interval:   time.Millisecond,
-		ChangeMode: device.ChangeFade.Ptr(),
-	})
-	if err != nil {
-		t.Fatalf("StreamColours: %v", err)
+	calls := m.recorded()
+	if len(calls) < 2 || calls[0].kind != "query" {
+		t.Fatalf("calls = %+v, want a warm-up query then colours", calls)
 	}
-
-	calls := mock.recorded()
-	if len(calls) < 2 {
-		t.Fatalf("recorded %d calls, want at least 2 (warm-up + colour)", len(calls))
-	}
-
-	if calls[0].cmd != protocol.DPQueryNew {
-		t.Errorf("first call cmd = 0x%02x, want 0x%02x (DP_QUERY_NEW warm-up)", calls[0].cmd, protocol.DPQueryNew)
-	}
-	if !calls[0].wait {
-		t.Error("warm-up query wait = false, want true")
-	}
-
-	// No DP 21 write: entering music mode via DP 28 is what avoids the
-	// start-of-drag flicker.
-	for i, c := range calls[1:] {
-		if c.cmd != protocol.ControlNew {
-			continue
-		}
-		dps := musicDPSFromPayload(t, c.payload)
-		if _, ok := dps[device.DPMode]; ok {
-			t.Errorf("call %d writes DP %s (mode); music mode must be entered via DP %s only", i+1, device.DPMode, device.DPMusic)
+	for _, c := range calls[1:] {
+		if c.kind == "control" && c.wait {
+			t.Error("colour send waits; the bulb stops acking mid-stream")
 		}
 	}
-
-	colourCall := calls[len(calls)-1]
-	if colourCall.cmd != protocol.ControlNew {
-		t.Fatalf("colour call cmd = 0x%02x, want 0x%02x (CONTROL_NEW)", colourCall.cmd, protocol.ControlNew)
+	for _, dps := range m.controls(t) {
+		if _, ok := dps["21"]; ok {
+			t.Errorf("stream writes DP 21 (%v); music mode must be entered via DP 28 only", dps)
+		}
 	}
-	if colourCall.wait {
-		t.Error("colour send wait = true, want false (the bulb stops acking mid-stream)")
-	}
-
-	dps := musicDPSFromPayload(t, colourCall.payload)
-	got, ok := dps[device.DPMusic]
-	if !ok {
-		t.Fatalf("payload dps = %v, want a DP %s entry", dps, device.DPMusic)
-	}
-	want := musicColourHexRef(t, device.ChangeFade, 255, 0, 0)
-	if got != want {
-		t.Errorf("DP %s = %v, want %q", device.DPMusic, got, want)
+	got := lastControl(t, m)
+	if want := adjustHex(t, dp.ChangeFade, dp.RGB{R: 255}); got["28"] != want || len(got) != 1 {
+		t.Errorf("dps = %v, want only DP 28 = %q", got, want)
 	}
 }
 
 // TestStreamColoursCoalesces verifies the newest-wins throttle: colours
 // arriving faster than the interval must not queue up behind each other.
 func TestStreamColoursCoalesces(t *testing.T) {
-	mock := newMockStreamSession()
-	b := NewBulb(mock, "test")
-
+	m := newMock()
 	colours := make(chan StreamColour)
 	done := make(chan error, 1)
 	go func() {
-		done <- b.StreamColours(context.Background(), colours, StreamOptions{
+		done <- New(m, "t").StreamColours(context.Background(), colours, StreamOptions{
 			Interval:   50 * time.Millisecond,
-			ChangeMode: device.ChangeFade.Ptr(),
+			ChangeMode: dp.ChangeFade.Ptr(),
 		})
 	}()
-
-	// Push a burst well inside one interval; only the last should survive.
 	for i := range 10 {
-		colours <- StreamColour{RGB: device.RGB{R: uint8(i)}}
+		colours <- StreamColour{RGB: dp.RGB{R: uint8(i)}}
 	}
 	close(colours)
-
 	if err := <-done; err != nil {
 		t.Fatalf("StreamColours: %v", err)
 	}
 
-	var colourCalls []streamCall
-	for _, c := range mock.recorded() {
-		if c.cmd == protocol.ControlNew {
-			colourCalls = append(colourCalls, c)
-		}
+	cs := m.controls(t)
+	if len(cs) == 0 || len(cs) >= 10 {
+		t.Fatalf("sent %d colours for a 10-colour burst inside one interval; expected coalescing", len(cs))
 	}
-	if len(colourCalls) == 0 {
-		t.Fatal("no colour was sent")
+	if got, want := cs[len(cs)-1]["28"], adjustHex(t, dp.ChangeFade, dp.RGB{R: 9}); got != want {
+		t.Errorf("last colour = %v, want %q (the newest of the burst)", got, want)
 	}
-	if len(colourCalls) >= 10 {
-		t.Errorf("sent %d colours for a 10-colour burst inside one interval; expected coalescing", len(colourCalls))
-	}
-
-	// Whatever the throttle dropped, the final colour must be the newest.
-	dps := musicDPSFromPayload(t, colourCalls[len(colourCalls)-1].payload)
-	want := musicColourHexRef(t, device.ChangeFade, 9, 0, 0)
-	if got := dps[device.DPMusic]; got != want {
-		t.Errorf("last colour = %v, want %q (the newest colour of the burst)", got, want)
-	}
-}
-
-// TestStreamColoursStopsDrainOnReturn guards the session hand-back: if the
-// drain goroutine outlived the stream it would steal responses from the
-// blocking commands a caller makes next (e.g. SetColour to persist).
-func TestStreamColoursStopsDrainOnReturn(t *testing.T) {
-	mock := newMockStreamSession()
-	b := NewBulb(mock, "test")
-
-	colours := make(chan StreamColour)
-	close(colours)
-
-	if err := b.StreamColours(context.Background(), colours, StreamOptions{}); err != nil {
-		t.Fatalf("StreamColours: %v", err)
-	}
-
-	select {
-	case <-mock.drainStarted:
-	default:
-		t.Fatal("drain goroutine never started")
-	}
-	select {
-	case <-mock.drainReturned:
-	case <-time.After(time.Second):
-		t.Fatal("drain goroutine still running after StreamColours returned")
-	}
-}
-
-// TestStreamColoursRequiresStreamSession checks the fallback path for a
-// protocol version that has no streaming support.
-func TestStreamColoursRequiresStreamSession(t *testing.T) {
-	b := NewBulb(nonStreamSession{}, "test")
-	colours := make(chan StreamColour)
-	close(colours)
-
-	err := b.StreamColours(context.Background(), colours, StreamOptions{})
-	if err == nil {
-		t.Fatal("expected an error for a session without streaming support, got nil")
-	}
-}
-
-// lastMusicHex runs a single-colour stream and returns the DP 28 value that
-// reached the wire, so a test can assert which change mode was encoded.
-func lastMusicHex(t *testing.T, c StreamColour, opts StreamOptions) string {
-	t.Helper()
-	mock := newMockStreamSession()
-	b := NewBulb(mock, "test")
-
-	colours := make(chan StreamColour, 1)
-	colours <- c
-	close(colours)
-
-	if opts.Interval <= 0 {
-		opts.Interval = time.Millisecond
-	}
-	if err := b.StreamColours(context.Background(), colours, opts); err != nil {
-		t.Fatalf("StreamColours: %v", err)
-	}
-	for i := len(mock.recorded()) - 1; i >= 0; i-- {
-		call := mock.recorded()[i]
-		if call.cmd != protocol.ControlNew {
-			continue
-		}
-		if s, ok := musicDPSFromPayload(t, call.payload)[device.DPMusic].(string); ok {
-			return s
-		}
-	}
-	t.Fatal("no colour was sent")
-	return ""
 }
 
 // TestStreamColoursPerColourChangeMode checks that a StreamColour carrying
-// its own change mode overrides the run default, while one that leaves it nil
-// falls back to StreamOptions.ChangeMode. This is what lets a picker's
-// jump/fade toggle take effect live.
+// its own change mode overrides the run default, while one that leaves it
+// nil falls back to StreamOptions.ChangeMode.
 func TestStreamColoursPerColourChangeMode(t *testing.T) {
-	opts := StreamOptions{ChangeMode: device.ChangeFade.Ptr()}
+	opts := StreamOptions{ChangeMode: dp.ChangeFade.Ptr()}
 
-	// A per-colour change mode (jump) must reach the wire, not the default (fade).
-	got := lastMusicHex(t, StreamColour{RGB: device.RGB{R: 255}, ChangeMode: device.ChangeJump.Ptr()}, opts)
-	if want := musicColourHexRef(t, device.ChangeJump, 255, 0, 0); got != want {
-		t.Errorf("per-colour change mode: DP %s = %q, want %q", device.DPMusic, got, want)
+	m := newMock()
+	stream(t, m, []StreamColour{{RGB: dp.RGB{R: 255}, ChangeMode: dp.ChangeJump.Ptr()}}, opts)
+	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeJump, dp.RGB{R: 255}); got != want {
+		t.Errorf("per-colour change mode: DP 28 = %v, want %q", got, want)
 	}
 
-	// A nil change mode falls back to the run default (fade).
-	got = lastMusicHex(t, StreamColour{RGB: device.RGB{G: 255}}, opts)
-	if want := musicColourHexRef(t, device.ChangeFade, 0, 255, 0); got != want {
-		t.Errorf("nil change mode: DP %s = %q, want %q", device.DPMusic, got, want)
+	m = newMock()
+	stream(t, m, []StreamColour{{RGB: dp.RGB{G: 255}}}, opts)
+	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeFade, dp.RGB{G: 255}); got != want {
+		t.Errorf("nil change mode: DP 28 = %v, want %q", got, want)
 	}
 }

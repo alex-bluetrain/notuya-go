@@ -2,12 +2,9 @@ package bulb
 
 import (
 	"context"
-	"fmt"
-	"sync"
 	"time"
 
-	"github.com/alex-bluetrain/notuya-go/pkg/device"
-	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
+	"github.com/alex-bluetrain/notuya-go/pkg/dp"
 )
 
 const (
@@ -31,8 +28,8 @@ type StreamOptions struct {
 
 	// ChangeMode is the per-update jump/fade flag sent on DP 28. Its zero
 	// value (ChangeJump) is a meaningful setting rather than "unset", so
-	// leave it nil to take device.DefaultChangeMode.
-	ChangeMode *device.ChangeMode
+	// leave it nil to take dp.DefaultChangeMode.
+	ChangeMode *dp.ChangeMode
 }
 
 // StreamColour is one unit of a colour stream: a colour plus an optional
@@ -40,8 +37,8 @@ type StreamOptions struct {
 // (StreamOptions.ChangeMode), so a producer that never sets it behaves
 // exactly as if it streamed bare colours.
 type StreamColour struct {
-	RGB        device.RGB
-	ChangeMode *device.ChangeMode
+	RGB        dp.RGB
+	ChangeMode *dp.ChangeMode
 }
 
 func (o StreamOptions) withDefaults() StreamOptions {
@@ -49,7 +46,7 @@ func (o StreamOptions) withDefaults() StreamOptions {
 		o.Interval = DefaultStreamInterval
 	}
 	if o.ChangeMode == nil {
-		o.ChangeMode = device.DefaultChangeMode.Ptr()
+		o.ChangeMode = dp.DefaultChangeMode.Ptr()
 	}
 	return o
 }
@@ -57,60 +54,49 @@ func (o StreamOptions) withDefaults() StreamOptions {
 // StreamColours streams colours to the bulb over the already-open session
 // until colours is closed or ctx is cancelled, then returns.
 //
-// Updates are sent fire-and-forget on DP 28 and coalesced to at most one
-// per opts.Interval, keeping only the newest pending colour: when the
-// producer outruns the bulb, the point is to track the latest colour, not
-// to replay a backlog of stale ones.
+// Updates are sent fire-and-forget on DP 28 ("real-time adjustment") and
+// coalesced to at most one per opts.Interval, keeping only the newest
+// pending colour: when the producer outruns the bulb, the point is to track
+// the latest colour, not to replay a backlog of stale ones.
 //
-// Sending DP 28 is also what puts the bulb into music mode — deliberately,
-// instead of setting DP 21 first. Writing the mode DP resets the bulb's
-// colour before the first update arrives, which shows up as a visible
-// flicker at the start of every drag.
+// Writing DP 28 alone is also what puts the bulb into music mode —
+// deliberately, instead of setting DP 21 first. Writing the mode DP resets
+// the bulb's colour before the first update arrives, which shows up as a
+// visible flicker at the start of every drag. (Tuya's spec pairs music mode
+// with DP 21 + DP 27; on the A60TY10W DP 28 alone is what works.)
 //
-// The bulb only acks the first message of a run, so every send after it
-// must not wait for a reply; a drain goroutine discards whatever the device
-// pushes meanwhile. It is stopped before this returns, leaving the session
-// safe for ordinary blocking commands — notably SetColour, which is how a
-// caller should finish a stream: it exits music mode and persists the final
-// colour in one step, where setting DP 21 back to "colour" would instead
-// revert the bulb to the colour it had before the stream started.
+// The bulb only acks the first message of a run, so sends never wait. The
+// session's reader goroutine absorbs whatever the bulb sends meanwhile, so
+// the session stays usable for ordinary commands during and after the
+// stream. Finish a stream with SetColour: it exits music mode and persists
+// the final colour in one step, where setting DP 21 back to "colour" would
+// instead revert the bulb to the colour it had before the stream started.
 func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, opts StreamOptions) error {
 	opts = opts.withDefaults()
+	schema := b.Schema()
 
-	session := b.dev.Session()
-	stream, ok := session.(protocol.StreamSession)
-	if !ok {
-		return fmt.Errorf("bulb: %s: colour streaming needs a protocol version that supports it", b.Name)
-	}
-
-	// Warm-up on the still-exclusively-owned connection: this is a
-	// blocking round trip, so it both confirms the device is reachable and
+	// Warm-up: a blocking round trip confirms the bulb is reachable and
 	// surfaces a dead session as an error here rather than as silently
 	// dropped colours later.
-	if err := b.Status(ctx); err != nil {
-		return fmt.Errorf("bulb: %s: preparing colour stream: %w", b.Name, err)
+	if _, err := b.Status(ctx); err != nil {
+		return b.errorf("preparing colour stream", err)
 	}
-
-	drainCtx, stopDrain := context.WithCancel(ctx)
-	drainErr := make(chan error, 1)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		drainErr <- stream.DrainInbound(drainCtx)
-	}()
-	defer func() {
-		stopDrain()
-		wg.Wait()
-	}()
 
 	send := func(c StreamColour) error {
 		mode := *opts.ChangeMode
 		if c.ChangeMode != nil {
 			mode = *c.ChangeMode
 		}
-		if err := b.dev.SetMusicColour(ctx, mode, c.RGB.R, c.RGB.G, c.RGB.B, false); err != nil {
-			return fmt.Errorf("bulb: %s: streaming colour: %w", b.Name, err)
+		vs, err := schema.RealTime(dp.Adjust{Mode: mode, Colour: dp.HSVFromRGB(c.RGB)})
+		var body []byte
+		if err == nil {
+			body, err = dp.Body(vs)
+		}
+		if err == nil {
+			err = b.sess.Control(ctx, body, false)
+		}
+		if err != nil {
+			return b.errorf("streaming colour", err)
 		}
 		return nil
 	}
@@ -128,13 +114,9 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, o
 		case <-ctx.Done():
 			return nil
 
-		case err := <-drainErr:
-			// The drain goroutine only returns early on a broken
-			// connection; continuing would just discard colours.
-			if err != nil {
-				return fmt.Errorf("bulb: %s: colour stream connection lost: %w", b.Name, err)
-			}
-			return nil
+		case <-b.sess.Done():
+			// Continuing would just discard colours.
+			return b.errorf("colour stream connection lost", b.sess.Err())
 
 		case c, ok := <-colours:
 			if !ok {
@@ -157,8 +139,8 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, o
 				}
 				lastSent = time.Now()
 			case time.Since(lastSent) >= streamHeartbeatInterval:
-				if _, err := session.Command(ctx, protocol.HeartBeat, nil, false); err != nil {
-					return fmt.Errorf("bulb: %s: colour stream heartbeat: %w", b.Name, err)
+				if err := b.sess.Heartbeat(ctx, false); err != nil {
+					return b.errorf("colour stream heartbeat", err)
 				}
 				lastSent = time.Now()
 			}

@@ -19,13 +19,13 @@ binary in this module.
 
 ## Scope
 
-- Tuya local protocol **v3.5 only** for now, with the `protocol.Session`
-  interface designed so that adding other versions (3.1/3.3/3.4) does not
-  require touching the layers above it.
-- `pkg/device`: raw DP-level API. `pkg/bulb`: on/off, colour, brightness,
-  plus `StreamColours` for live colour streaming over one persistent
-  session (music mode, per-update `jump`/`fade` change mode, stale updates
-  coalesced). `pkg/discovery`: LAN scan for `device_id` + IP.
+- Tuya local protocol **v3.5 only** for now, in four layers (transport →
+  session → `dp` → `bulb`/`discovery`) so another version is a new
+  transport/session pair with nothing above it changed.
+- `pkg/bulb`: on/off, colour, white, scenes, timer, do-not-disturb, status
+  pushes (`Watch`), and `StreamColours` for live colour streaming over one
+  persistent session. `pkg/dp`: every documented DP, encoded and validated.
+  `pkg/discovery`: LAN scan for `device_id` + IP.
 - No external dependencies — only the Go stdlib. No cgo.
 
 ## Development

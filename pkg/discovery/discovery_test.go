@@ -2,46 +2,60 @@ package discovery
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net"
+	"strconv"
 	"testing"
+	"time"
 
-	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
-	"github.com/alex-bluetrain/notuya-go/pkg/protocol35"
+	"github.com/alex-bluetrain/notuya-go/pkg/transport/udp"
+	v35 "github.com/alex-bluetrain/notuya-go/pkg/transport/v35"
 )
 
-// TestDiscoveryFrameRoundTrip is a network-independent sanity check for
-// the framing this package relies on: encode a device announcement under
-// the well-known discovery key exactly as a real device would, then
-// confirm Scan's own decode path (protocol35.DecodeFrame + json.Unmarshal
-// into Device) recovers it.
-func TestDiscoveryFrameRoundTrip(t *testing.T) {
-	key := discoveryKey()
-	want := Device{ID: "ebfake1111111111111111", IP: "192.168.1.6", Version: "3.5"}
-	body, err := json.Marshal(want)
+// TestListenDecodesAnnouncements sends a device announcement to a
+// listener exactly as a real device would — a 6699 frame under the
+// well-known discovery key — and checks Listen's path recovers it.
+func TestListenDecodesAnnouncements(t *testing.T) {
+	probe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := probe.LocalAddr().(*net.UDPAddr).Port
+	probe.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	devices, err := listen(ctx, port)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	iv := bytes.Repeat([]byte{0x42}, ivLen)
-	frame, err := protocol35.EncodeFrame(key, iv, 1, protocol.ReqDevInfo, body)
+	want := Device{ID: "ebfake1111111111111111", IP: "192.168.1.6", Version: "3.5"}
+	body, _ := json.Marshal(want)
+	frame, err := v35.Encode(udp.Key(), bytes.Repeat([]byte{0x42}, v35.IVLen), v35.Frame{Seqno: 1, Cmd: 0x13, Payload: body})
 	if err != nil {
-		t.Fatalf("EncodeFrame: %v", err)
+		t.Fatal(err)
+	}
+	conn, err := net.Dial("udp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatal(err)
 	}
 
-	cmd, payload, err := protocol35.DecodeFrame(key, frame)
-	if err != nil {
-		t.Fatalf("DecodeFrame: %v", err)
+	select {
+	case got := <-devices:
+		if got != want {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
+	case <-ctx.Done():
+		t.Fatal("no announcement received")
 	}
-	if cmd != protocol.ReqDevInfo {
-		t.Errorf("cmd = %d, want %d", cmd, protocol.ReqDevInfo)
-	}
-
-	var got Device
-	if err := json.Unmarshal(payload, &got); err != nil {
-		t.Fatalf("unmarshalling payload: %v", err)
-	}
-	if got != want {
-		t.Errorf("got %+v, want %+v", got, want)
+	cancel()
+	for range devices {
 	}
 }
 
@@ -97,21 +111,5 @@ func TestOwnSolicitationIsIgnored(t *testing.T) {
 	}
 	if d, ok := parseAnnouncement(own); ok {
 		t.Errorf("our own request was reported as device %+v", d)
-	}
-}
-
-// TestBroadcastTargetsAreUnique: two interfaces on one subnet share a
-// directed broadcast address, and sending it twice only duplicates the
-// copies of our own request that come back.
-func TestBroadcastTargetsAreUnique(t *testing.T) {
-	seen := map[string]bool{}
-	for _, ip := range broadcastTargets() {
-		if seen[ip.String()] {
-			t.Errorf("duplicate broadcast target %s", ip)
-		}
-		seen[ip.String()] = true
-	}
-	if !seen["255.255.255.255"] {
-		t.Error("the limited broadcast address is missing")
 	}
 }

@@ -2,35 +2,18 @@ package discovery
 
 import (
 	"context"
-	"crypto/md5"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/alex-bluetrain/notuya-go/pkg/protocol"
-	"github.com/alex-bluetrain/notuya-go/pkg/protocol35"
+	"github.com/alex-bluetrain/notuya-go/pkg/transport/udp"
 )
 
-const (
-	unsolicitedPort = 6667 // devices broadcast their presence here periodically
-	solicitedPort   = 7000 // "app" solicitation + device replies
-
-	ivLen = 12
-
-	// solicitInterval is how often the discovery request is repeated
-	// during a scan.
-	solicitInterval = 1500 * time.Millisecond
-)
-
-// discoveryKey is Tuya's well-known, hardcoded key used to encrypt/decrypt
-// LAN discovery traffic — never a device's own local_key.
-func discoveryKey() []byte {
-	sum := md5.Sum([]byte("yGAdlopoPVldABfn"))
-	return sum[:]
-}
+// solicitInterval is how often the discovery request is repeated during a
+// scan.
+const solicitInterval = 1500 * time.Millisecond
 
 // Device is one discovered Tuya device announcement.
 type Device struct {
@@ -39,73 +22,93 @@ type Device struct {
 	Version string `json:"version"`
 }
 
-// Scan listens for Tuya LAN discovery broadcasts for the given duration
-// and returns every distinct device seen (deduped by ID). It also makes a
-// best-effort attempt at the "solicited" discovery pattern (broadcasting
-// a request on UDP/7000) to prompt a faster reply; that attempt is
-// non-fatal if the platform/network refuses a broadcast send (e.g.
-// missing SO_BROADCAST permission) — passive listening on UDP/6667 alone
-// is enough to find devices, since they announce themselves periodically
-// on their own.
-func Scan(ctx context.Context, timeout time.Duration) ([]Device, error) {
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: unsolicitedPort})
-	if err != nil {
-		return nil, fmt.Errorf("discovery: listening on :%d: %w", unsolicitedPort, err)
-	}
-	defer conn.Close()
+// Listen reports device announcements until ctx is cancelled, then closes
+// the channel. It is passive: it only hears devices announcing themselves,
+// which they do periodically on UDP/6667 (encrypted, code 0x13/0x23) and,
+// on older firmware, UDP/6666 (plaintext). A device announcing on several
+// ports, or repeatedly, is reported each time; dedupe by ID if needed.
+//
+// It fails only if neither port can be bound.
+func Listen(ctx context.Context) (<-chan Device, error) {
+	return listen(ctx, udp.AnnouncePort, udp.AnnouncePortPlain)
+}
 
-	replyConn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: solicitedPort})
-
-	deadline := time.Now().Add(timeout)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		deadline = ctxDeadline
-	}
-
-	if err == nil {
-		defer replyConn.Close()
-		go solicitRepeatedly(ctx, deadline)
-	}
-	_ = conn.SetReadDeadline(deadline)
-	if replyConn != nil {
-		_ = replyConn.SetReadDeadline(deadline)
-	}
-
-	key := discoveryKey()
-
-	// Both ports are drained concurrently, so announcements travel over a
-	// channel rather than into a shared map.
-	seen := make(chan Device)
-	drain := func(c *net.UDPConn) {
-		if c == nil {
-			return
+func listen(ctx context.Context, ports ...int) (<-chan Device, error) {
+	var ls []*udp.Listener
+	var firstErr error
+	for _, p := range ports {
+		l, err := udp.Listen(p)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
-		buf := make([]byte, 4096)
-		for {
-			n, _, err := c.ReadFromUDP(buf)
-			if err != nil {
-				return // timeout or closed
-			}
-			_, payload, err := protocol35.DecodeFrame(key, buf[:n])
-			if err != nil {
-				continue
-			}
-			if d, ok := parseAnnouncement(payload); ok {
-				seen <- d
-			}
-		}
+		ls = append(ls, l)
+	}
+	if len(ls) == 0 {
+		return nil, fmt.Errorf("discovery: %w", firstErr)
 	}
 
+	out := make(chan Device)
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); drain(conn) }()
-	go func() { defer wg.Done(); drain(replyConn) }()
-	go func() { wg.Wait(); close(seen) }()
+	for _, l := range ls {
+		wg.Add(1)
+		go func(l *udp.Listener) {
+			defer wg.Done()
+			for {
+				p, err := l.Read()
+				if err != nil {
+					return // closed
+				}
+				d, ok := parseAnnouncement(p.Payload)
+				if !ok {
+					continue
+				}
+				select {
+				case out <- d:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(l)
+	}
+	go func() {
+		<-ctx.Done()
+		for _, l := range ls {
+			l.Close()
+		}
+	}()
+	go func() { wg.Wait(); close(out) }()
+	return out, nil
+}
 
+// Scan collects devices for the given duration and returns every distinct
+// one (deduped by ID). Alongside passive listening it repeatedly
+// broadcasts the solicited-discovery request on UDP/7000, which prompts
+// v3.5 devices to reply sooner than their next periodic announcement.
+// Solicitation is best-effort: if the platform refuses the broadcast or
+// port 7000 is taken, passive listening alone still finds devices.
+func Scan(ctx context.Context, timeout time.Duration) ([]Device, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ports := []int{udp.AnnouncePort, udp.AnnouncePortPlain}
+	// The reply port is only worth listening on if we can solicit.
+	if l, err := udp.Listen(udp.SolicitPort); err == nil {
+		l.Close()
+		ports = append(ports, udp.SolicitPort)
+		go solicitRepeatedly(ctx)
+	}
+
+	seen, err := listen(ctx, ports...)
+	if err != nil {
+		return nil, err
+	}
 	found := make(map[string]Device)
 	for d := range seen {
 		found[d.ID] = d
 	}
-
 	devices := make([]Device, 0, len(found))
 	for _, d := range found {
 		devices = append(devices, d)
@@ -113,126 +116,38 @@ func Scan(ctx context.Context, timeout time.Duration) ([]Device, error) {
 	return devices, nil
 }
 
-// solicitRepeatedly re-sends the discovery request until the scan window
-// closes. A single request is unreliable in practice — observed on the
-// development network, the first attempts routinely go unanswered while
-// later ones get every device — and UDP offers no delivery guarantee
-// anyway, so one lost request would otherwise mean an empty scan.
-func solicitRepeatedly(ctx context.Context, deadline time.Time) {
+// solicitRepeatedly re-sends the discovery request until ctx ends. A
+// single request is unreliable in practice — observed on the development
+// network, the first attempts routinely go unanswered while later ones get
+// every device — and UDP offers no delivery guarantee anyway.
+func solicitRepeatedly(ctx context.Context) {
 	ticker := time.NewTicker(solicitInterval)
 	defer ticker.Stop()
-
 	for {
-		trySolicit()
+		udp.Solicit(solicitBody)
 		select {
 		case <-ctx.Done():
 			return
-		case now := <-ticker.C:
-			if !now.Before(deadline) {
-				return
-			}
+		case <-ticker.C:
 		}
 	}
 }
 
-// trySolicit sends the solicited-discovery request ({"from":"app","ip":…})
-// as a broadcast on UDP/7000, prompting v3.5 devices to reply sooner than
-// waiting for their next periodic unsolicited announcement. Best-effort:
-// errors (including a platform refusing the broadcast send outright) are
-// silently ignored — the caller falls back to passive listening.
-func trySolicit() {
-	targets := broadcastTargets()
-
-	// One request per interface, bound to that interface and advertising
-	// its own address. The request tells the device where to reply, so
-	// sending from an unbound socket would announce one interface's
-	// address while the kernel routed the packet out of another.
-	for _, src := range localIPv4s() {
-		body, err := json.Marshal(map[string]string{"from": "app", "ip": src.String()})
-		if err != nil {
-			continue
-		}
-		iv := make([]byte, ivLen)
-		if _, err := rand.Read(iv); err != nil {
-			continue
-		}
-		frame, err := protocol35.EncodeFrame(discoveryKey(), iv, 1, protocol.ReqDevInfo, body)
-		if err != nil {
-			continue
-		}
-		sender, err := net.ListenUDP("udp4", &net.UDPAddr{IP: src})
-		if err != nil {
-			continue
-		}
-		for _, dst := range targets {
-			_, _ = sender.WriteToUDP(frame, &net.UDPAddr{IP: dst, Port: solicitedPort})
-		}
-		sender.Close()
-	}
+// solicitBody is the request ({"from":"app","ip":…}) advertising the
+// interface it is sent from, which is where the device replies.
+func solicitBody(src net.IP) []byte {
+	b, _ := json.Marshal(map[string]string{"from": "app", "ip": src.String()})
+	return b
 }
 
-// localIPv4s is every usable IPv4 address of this host.
-func localIPv4s() []net.IP {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil
-	}
-	var ips []net.IP
-	for _, a := range addrs {
-		ipnet, ok := a.(*net.IPNet)
-		if !ok || ipnet.IP.IsLoopback() {
-			continue
-		}
-		if v4 := ipnet.IP.To4(); v4 != nil {
-			ips = append(ips, v4)
-		}
-	}
-	return ips
-}
-
-// broadcastTargets is the limited broadcast address plus the directed
-// broadcast of every up, non-loopback IPv4 interface, deduplicated:
-// interfaces sharing a subnet yield the same address, and sending it twice
-// only produces duplicate copies of our own request coming back at us.
-func broadcastTargets() []net.IP {
-	targets := []net.IP{net.IPv4bcast}
-	sent := map[string]bool{net.IPv4bcast.String(): true}
-
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return targets
-	}
-	for _, a := range addrs {
-		ipnet, ok := a.(*net.IPNet)
-		if !ok || ipnet.IP.IsLoopback() {
-			continue
-		}
-		ip := ipnet.IP.To4()
-		mask := ipnet.Mask
-		if ip == nil || len(mask) != net.IPv4len {
-			continue
-		}
-		bcast := make(net.IP, net.IPv4len)
-		for i := range bcast {
-			bcast[i] = ip[i] | ^mask[i]
-		}
-		if sent[bcast.String()] {
-			continue
-		}
-		sent[bcast.String()] = true
-		targets = append(targets, bcast)
-	}
-	return targets
-}
-
-// parseAnnouncement turns a decrypted discovery payload into a Device,
-// reporting false for anything that is not a device announcement.
+// parseAnnouncement turns a discovery payload into a Device, reporting
+// false for anything that is not a device announcement.
 func parseAnnouncement(payload []byte) (Device, bool) {
-	// Solicited replies (UDP/7000) carry a retcode ahead of the JSON like
-	// any other device-originated frame; the unsolicited announcements on
-	// UDP/6667 do not.
-	if body, err := protocol35.StripRetcode(payload); err == nil && looksLikeJSON(body) {
-		payload = body
+	// Solicited replies (UDP/7000) carry a 4-byte retcode ahead of the JSON
+	// like any other device-originated frame; the periodic announcements
+	// do not.
+	if !looksLikeJSON(payload) && len(payload) > 4 && looksLikeJSON(payload[4:]) {
+		payload = payload[4:]
 	}
 
 	// Our own solicitation comes back to us: it goes to a broadcast

@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alex-bluetrain/notuya-go/pkg/protocol35"
+	"github.com/alex-bluetrain/notuya-go/pkg/dp"
+	v35 "github.com/alex-bluetrain/notuya-go/pkg/session/v35"
 )
 
 // TestBulbAgainstRealDevice exercises the full business control surface
@@ -25,30 +26,30 @@ func TestBulbAgainstRealDevice(t *testing.T) {
 
 	run := func(t *testing.T, fn func(ctx context.Context, b *Bulb) error) {
 		t.Helper()
-		sess := protocol35.NewSession(ip, []byte(key))
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := sess.Open(ctx); err != nil {
+		sess, err := v35.Open(ctx, ip, []byte(key), v35.Options{})
+		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
 		defer sess.Close()
-		b := NewBulb(sess, "integration-test-bulb")
+		b := New(sess, "integration-test-bulb")
 		if err := fn(ctx, b); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	t.Run("Status", func(t *testing.T) {
-		run(t, func(ctx context.Context, b *Bulb) error { return b.Status(ctx) })
+		run(t, func(ctx context.Context, b *Bulb) error { _, err := b.Status(ctx); return err })
 	})
 	t.Run("TurnOn", func(t *testing.T) {
 		run(t, func(ctx context.Context, b *Bulb) error { return b.TurnOn(ctx) })
 	})
 	t.Run("SetColour red", func(t *testing.T) {
-		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, 255, 0, 0) })
+		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, dp.RGB{R: 255}) })
 	})
 	t.Run("SetColour green", func(t *testing.T) {
-		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, 0, 255, 0) })
+		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, dp.RGB{G: 255}) })
 	})
 	t.Run("TurnOff", func(t *testing.T) {
 		run(t, func(ctx context.Context, b *Bulb) error { return b.TurnOff(ctx) })
