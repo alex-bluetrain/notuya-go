@@ -7,9 +7,8 @@ import (
 	"github.com/alex-bluetrain/notuya-go/pkg/dp"
 )
 
-// DefaultStreamInterval throttles sends to ~25fps. Matches the sibling
-// Python picker, where this was found to be the fastest rate the bulb keeps
-// up with while dragging.
+// DefaultStreamInterval throttles sends to ~25fps, the fastest rate the bulb
+// was found to keep up with while dragging.
 const DefaultStreamInterval = 40 * time.Millisecond
 
 // StreamOptions tunes a StreamColours run. The zero value is valid and
