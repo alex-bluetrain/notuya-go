@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/alex-bluetrain/notuya-go/compare/v1.1.0...v1.2.0) (2026-10-05)
+
+
+### Features
+
+* **bulb:** HSV-only colour API and a single-send SendLive ([da96be3](https://github.com/alex-bluetrain/notuya-go/commit/da96be3fa7c75a1b79a2218f2a2112b9f2954268))
+
 ## [1.1.0](https://github.com/alex-bluetrain/notuya-go/compare/v1.0.0...v1.1.0) (2026-10-05)
 
 Released as 1.1.0 rather than 2.0.0 so the module path keeps no `/v2`
