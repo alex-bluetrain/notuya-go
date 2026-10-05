@@ -29,7 +29,7 @@ type StreamOptions struct {
 // (StreamOptions.ChangeMode), so a producer that never sets it behaves
 // exactly as if it streamed bare colours.
 type StreamColour struct {
-	RGB        dp.RGB
+	Colour     dp.HSV
 	ChangeMode *dp.ChangeMode
 }
 
@@ -78,18 +78,7 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, o
 		if c.ChangeMode != nil {
 			mode = *c.ChangeMode
 		}
-		vs, err := dp.Schema20.RealTime(dp.Adjust{Mode: mode, Colour: dp.HSVFromRGB(c.RGB)})
-		if err != nil {
-			return b.errorf("streaming colour", err)
-		}
-		body, err := dp.Body(vs)
-		if err != nil {
-			return b.errorf("streaming colour", err)
-		}
-		if err := b.sess.Control(ctx, body, false); err != nil {
-			return b.errorf("streaming colour", err)
-		}
-		return nil
+		return b.SendLive(ctx, c.Colour, mode)
 	}
 
 	ticker := time.NewTicker(opts.Interval)
@@ -128,4 +117,23 @@ func (b *Bulb) StreamColours(ctx context.Context, colours <-chan StreamColour, o
 			}
 		}
 	}
+}
+
+// SendLive sends one colour on DP 28 ("real-time adjustment") without
+// waiting for an ack, like a single StreamColours update. It is for callers
+// that run their own send loop over the session; the same rules apply:
+// finish with SetColour to persist the colour.
+func (b *Bulb) SendLive(ctx context.Context, c dp.HSV, mode dp.ChangeMode) error {
+	vs, err := dp.Schema20.RealTime(dp.Adjust{Mode: mode, Colour: c})
+	if err != nil {
+		return b.errorf("streaming colour", err)
+	}
+	body, err := dp.Body(vs)
+	if err != nil {
+		return b.errorf("streaming colour", err)
+	}
+	if err := b.sess.Control(ctx, body, false); err != nil {
+		return b.errorf("streaming colour", err)
+	}
+	return nil
 }

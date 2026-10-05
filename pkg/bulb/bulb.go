@@ -126,13 +126,8 @@ func (b *Bulb) TurnOff(ctx context.Context) error {
 
 // SetColour switches to colour mode with c. It also ends a colour stream,
 // persisting c as the bulb's colour.
-func (b *Bulb) SetColour(ctx context.Context, c dp.RGB) error {
-	return b.write(ctx, "set colour", dp.Schema20.Colour(c))
-}
-
-// SetColourHSV switches to colour mode with c.
-func (b *Bulb) SetColourHSV(ctx context.Context, c dp.HSV) error {
-	vs, err := dp.Schema20.ColourHSV(c)
+func (b *Bulb) SetColour(ctx context.Context, c dp.HSV) error {
+	vs, err := dp.Schema20.Colour(c)
 	if err != nil {
 		return b.errorf("set colour", err)
 	}

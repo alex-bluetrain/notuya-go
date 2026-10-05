@@ -37,55 +37,8 @@ func TestTuyaDocumentedExamples(t *testing.T) {
 	}
 }
 
-// Reference vectors from tinytuya's rgb_to_hexvalue(r, g, b, 'hsv16').
-func TestHSVFromRGBMatchesTinytuya(t *testing.T) {
-	cases := []struct {
-		c    RGB
-		want string
-	}{
-		{RGB{255, 0, 0}, "000003e803e8"},
-		{RGB{0, 255, 0}, "007803e803e8"},
-		{RGB{0, 0, 255}, "00f003e803e8"},
-		{RGB{255, 255, 255}, "0000000003e8"},
-		{RGB{0, 0, 0}, "000000000000"},
-		{RGB{255, 136, 0}, "002003e803e8"},
-		{RGB{18, 52, 86}, "00d203160151"},
-		{RGB{1, 2, 3}, "00d2029a000b"},
-	}
-	for _, c := range cases {
-		if got, _ := HSVFromRGB(c.c).Hex(); got != c.want {
-			t.Errorf("%v: got %q, want %q", c.c, got, c.want)
-		}
-	}
-	for _, c := range []RGB{{255, 0, 0}, {0, 0, 255}, {255, 255, 255}} {
-		if got := HSVFromRGB(c).RGB(); got != c {
-			t.Errorf("round trip %v -> %v", c, got)
-		}
-	}
-}
-
-func TestHSVToRGB(t *testing.T) {
-	cases := []struct {
-		in   HSV
-		want RGB
-	}{
-		{HSV{0, 0, 1000}, RGB{255, 255, 255}},
-		{HSV{0, 1000, 1000}, RGB{255, 0, 0}},
-		{HSV{120, 1000, 1000}, RGB{0, 255, 0}},
-		{HSV{240, 1000, 1000}, RGB{0, 0, 255}},
-		{HSV{360, 1000, 1000}, RGB{255, 0, 0}}, // 360° wraps to red
-		{HSV{0, 0, 0}, RGB{0, 0, 0}},
-		{HSV{30, 1000, 500}, RGB{128, 64, 0}}, // rounds, not truncates
-	}
-	for _, c := range cases {
-		if got := c.in.RGB(); got != c.want {
-			t.Errorf("%+v.RGB() = %+v, want %+v", c.in, got, c.want)
-		}
-	}
-}
-
 func TestRealTimeStreamPayload(t *testing.T) {
-	v, err := Schema20.RealTime(Adjust{Mode: ChangeJump, Colour: HSVFromRGB(RGB{255, 0, 0})})
+	v, err := Schema20.RealTime(Adjust{Mode: ChangeJump, Colour: HSV{0, 1000, 1000}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +61,8 @@ func TestRangesAreEnforced(t *testing.T) {
 		{"temp -1", err2(Schema20.ColourTemp(-1))},
 		{"temp 1001", err2(Schema20.ColourTemp(1001))},
 		{"timer 86401", err2(Schema20.Timer(TimerMax + 1))},
-		{"hue 361", err2(Schema20.ColourHSV(HSV{361, 0, 0}))},
-		{"sat 1001", err2(Schema20.ColourHSV(HSV{0, 1001, 0}))},
+		{"hue 361", err2(Schema20.Colour(HSV{361, 0, 0}))},
+		{"sat 1001", err2(Schema20.Colour(HSV{0, 1001, 0}))},
 		{"interval 101", err2(Schema20.Scene(SceneValue{1, []SceneUnit{{Interval: 101}}}))},
 		{"transition 3", err2(Schema20.Scene(SceneValue{1, []SceneUnit{{Transition: 3}}}))},
 		{"empty scene", err2(Schema20.Scene(SceneValue{ID: 1}))},

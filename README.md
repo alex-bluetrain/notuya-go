@@ -24,7 +24,7 @@ binary in this module.
   session → `dp` → `bulb`/`discovery`) so another version is a new
   transport/session pair with nothing above it changed.
 - `pkg/bulb`: on/off, colour, white, scenes, timer, do-not-disturb, status
-  pushes (`Watch`), and `StreamColours` for live colour streaming over one
+  pushes (`Watch`), and `StreamColours`/`SendLive` for live colour over one
   persistent session. `pkg/dp`: every documented DP, encoded and validated.
   `pkg/discovery`: LAN scan for `device_id` + IP.
 - No external dependencies — only the Go stdlib. No cgo.

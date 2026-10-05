@@ -9,9 +9,9 @@ import (
 )
 
 // adjustHex is the DP 28 value expected for a colour sent with mode.
-func adjustHex(t *testing.T, mode dp.ChangeMode, c dp.RGB) string {
+func adjustHex(t *testing.T, mode dp.ChangeMode, c dp.HSV) string {
 	t.Helper()
-	h, err := dp.Adjust{Mode: mode, Colour: dp.HSVFromRGB(c)}.Hex()
+	h, err := dp.Adjust{Mode: mode, Colour: c}.Hex()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +38,8 @@ func stream(t *testing.T, m *mockSession, cs []StreamColour, opts StreamOptions)
 // wire instead of being read as "unset" and replaced by the default (fade).
 func TestStreamColoursHonoursJump(t *testing.T) {
 	m := newMock()
-	stream(t, m, []StreamColour{{RGB: dp.RGB{R: 255}}}, StreamOptions{ChangeMode: dp.ChangeJump.Ptr()})
-	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeJump, dp.RGB{R: 255}); got != want {
+	stream(t, m, []StreamColour{{Colour: dp.HSV{H: 0, S: 1000, V: 1000}}}, StreamOptions{ChangeMode: dp.ChangeJump.Ptr()})
+	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeJump, dp.HSV{H: 0, S: 1000, V: 1000}); got != want {
 		t.Errorf("DP 28 = %v, want %q (jump must survive)", got, want)
 	}
 }
@@ -49,7 +49,7 @@ func TestStreamColoursHonoursJump(t *testing.T) {
 // never touch the mode DP.
 func TestStreamColoursPayloadShape(t *testing.T) {
 	m := newMock()
-	stream(t, m, []StreamColour{{RGB: dp.RGB{R: 255}}}, StreamOptions{ChangeMode: dp.ChangeFade.Ptr()})
+	stream(t, m, []StreamColour{{Colour: dp.HSV{H: 0, S: 1000, V: 1000}}}, StreamOptions{ChangeMode: dp.ChangeFade.Ptr()})
 
 	calls := m.recorded()
 	if len(calls) < 2 || calls[0].kind != "query" {
@@ -66,7 +66,7 @@ func TestStreamColoursPayloadShape(t *testing.T) {
 		}
 	}
 	got := lastControl(t, m)
-	if want := adjustHex(t, dp.ChangeFade, dp.RGB{R: 255}); got["28"] != want || len(got) != 1 {
+	if want := adjustHex(t, dp.ChangeFade, dp.HSV{H: 0, S: 1000, V: 1000}); got["28"] != want || len(got) != 1 {
 		t.Errorf("dps = %v, want only DP 28 = %q", got, want)
 	}
 }
@@ -84,7 +84,7 @@ func TestStreamColoursCoalesces(t *testing.T) {
 		})
 	}()
 	for i := range 10 {
-		colours <- StreamColour{RGB: dp.RGB{R: uint8(i)}}
+		colours <- StreamColour{Colour: dp.HSV{V: i}}
 	}
 	close(colours)
 	if err := <-done; err != nil {
@@ -95,7 +95,7 @@ func TestStreamColoursCoalesces(t *testing.T) {
 	if len(cs) == 0 || len(cs) >= 10 {
 		t.Fatalf("sent %d colours for a 10-colour burst inside one interval; expected coalescing", len(cs))
 	}
-	if got, want := cs[len(cs)-1]["28"], adjustHex(t, dp.ChangeFade, dp.RGB{R: 9}); got != want {
+	if got, want := cs[len(cs)-1]["28"], adjustHex(t, dp.ChangeFade, dp.HSV{V: 9}); got != want {
 		t.Errorf("last colour = %v, want %q (the newest of the burst)", got, want)
 	}
 }
@@ -107,14 +107,30 @@ func TestStreamColoursPerColourChangeMode(t *testing.T) {
 	opts := StreamOptions{ChangeMode: dp.ChangeFade.Ptr()}
 
 	m := newMock()
-	stream(t, m, []StreamColour{{RGB: dp.RGB{R: 255}, ChangeMode: dp.ChangeJump.Ptr()}}, opts)
-	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeJump, dp.RGB{R: 255}); got != want {
+	stream(t, m, []StreamColour{{Colour: dp.HSV{H: 0, S: 1000, V: 1000}, ChangeMode: dp.ChangeJump.Ptr()}}, opts)
+	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeJump, dp.HSV{H: 0, S: 1000, V: 1000}); got != want {
 		t.Errorf("per-colour change mode: DP 28 = %v, want %q", got, want)
 	}
 
 	m = newMock()
-	stream(t, m, []StreamColour{{RGB: dp.RGB{G: 255}}}, opts)
-	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeFade, dp.RGB{G: 255}); got != want {
+	stream(t, m, []StreamColour{{Colour: dp.HSV{H: 120, S: 1000, V: 1000}}}, opts)
+	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeFade, dp.HSV{H: 120, S: 1000, V: 1000}); got != want {
 		t.Errorf("nil change mode: DP 28 = %v, want %q", got, want)
+	}
+}
+
+func TestSendLiveDoesNotWait(t *testing.T) {
+	m := newMock()
+	b := New(m, "test")
+	c := dp.HSV{H: 120, S: 500, V: 10}
+	if err := b.SendLive(context.Background(), c, dp.ChangeFade); err != nil {
+		t.Fatal(err)
+	}
+	calls := m.recorded()
+	if len(calls) != 1 || calls[0].wait {
+		t.Fatalf("calls = %+v, want one unwaited control", calls)
+	}
+	if got, want := lastControl(t, m)["28"], adjustHex(t, dp.ChangeFade, c); got != want {
+		t.Fatalf("DP 28 = %v, want %v", got, want)
 	}
 }

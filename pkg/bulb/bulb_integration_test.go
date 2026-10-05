@@ -46,10 +46,10 @@ func TestBulbAgainstRealDevice(t *testing.T) {
 		run(t, func(ctx context.Context, b *Bulb) error { return b.TurnOn(ctx) })
 	})
 	t.Run("SetColour red", func(t *testing.T) {
-		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, dp.RGB{R: 255}) })
+		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, dp.HSV{H: 0, S: 1000, V: 1000}) })
 	})
 	t.Run("SetColour green", func(t *testing.T) {
-		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, dp.RGB{G: 255}) })
+		run(t, func(ctx context.Context, b *Bulb) error { return b.SetColour(ctx, dp.HSV{H: 120, S: 1000, V: 1000}) })
 	})
 	t.Run("TurnOff", func(t *testing.T) {
 		run(t, func(ctx context.Context, b *Bulb) error { return b.TurnOff(ctx) })

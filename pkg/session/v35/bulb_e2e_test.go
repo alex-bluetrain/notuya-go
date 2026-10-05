@@ -33,8 +33,8 @@ func TestBulbEndToEnd(t *testing.T) {
 			ChangeMode: dp.ChangeFade.Ptr(),
 		})
 	}()
-	for i, c := range []dp.RGB{{R: 255}, {G: 255}, {B: 255}} {
-		colours <- bulb.StreamColour{RGB: c}
+	for i, c := range []dp.HSV{{H: 0, S: 1000, V: 1000}, {H: 120, S: 1000, V: 1000}, {H: 240, S: 1000, V: 1000}} {
+		colours <- bulb.StreamColour{Colour: c}
 		if i == 1 {
 			// The bulb reports something mid-stream; it must reach
 			// Watch without disturbing the stream.
@@ -104,9 +104,9 @@ func TestStreamPauseKeptAliveBySession(t *testing.T) {
 		done <- b.StreamColours(ctx, colours, bulb.StreamOptions{Interval: 5 * time.Millisecond})
 	}()
 
-	colours <- bulb.StreamColour{RGB: dp.RGB{R: 255}}
+	colours <- bulb.StreamColour{Colour: dp.HSV{H: 0, S: 1000, V: 1000}}
 	time.Sleep(200 * time.Millisecond) // a pointer held still mid-drag
-	colours <- bulb.StreamColour{RGB: dp.RGB{G: 255}}
+	colours <- bulb.StreamColour{Colour: dp.HSV{H: 120, S: 1000, V: 1000}}
 	close(colours)
 	if err := <-done; err != nil {
 		t.Fatalf("StreamColours after pause: %v", err)

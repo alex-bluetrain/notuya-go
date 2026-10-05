@@ -82,7 +82,7 @@ consumer is the sibling `notuya-gui`, wired in dev with a gitignored
 - **`bulb`** — domain verbs (`TurnOn`, `SetColour`, `SetWhiteBrightness`,
   `SetColourTempPercent`, `SetScene`, `SetTimer`, `SetDoNotDisturb`,
   `SetMusicSync`), `Status`/`Capabilities`/`Refresh`, `Watch` (pushes decoded
-  to `dp.State`), `StreamColours`, and `Set(dp.Values)` as the escape hatch
+  to `dp.State`), `StreamColours`/`SendLive` (DP 28, unacked), and `Set(dp.Values)` as the escape hatch
   for DPs without a verb. Verbs always wait for the ack.
 - **`discovery`** — `Scan` (solicit + listen for a window) and `Listen`
   (passive announcements on 6667/6666).
@@ -249,8 +249,9 @@ an empty scan that looked exactly like a network limitation:
   A session outlives the short context that opened it, so `Open` clears the
   handshake deadline before returning. Getting this wrong once killed
   streams ~10s in, silently.
-- Colour conversion: an exact port of Python's `colorsys.rgb_to_hsv`, with
-  truncation (not rounding) for bit-for-bit parity with tinytuya.
+- Colours are `dp.HSV` end to end (hue 0–360, saturation/value 0–1000),
+  the bulb's own model. There is no RGB type: converting is the caller's
+  job, so the library never throws away resolution.
 
 ## Decisions taken against tinytuya
 
@@ -345,7 +346,7 @@ There is no cgo in any package.
 persistent session, so an interactive picker can drive a bulb live. See
 *DP 28* above for the wire format.
 
-Each `bulb.StreamColour` is a `dp.RGB` plus an optional `*dp.ChangeMode`; nil
+Each `bulb.StreamColour` is a `dp.HSV` plus an optional `*dp.ChangeMode`; nil
 falls back to `StreamOptions.ChangeMode`. Pointers because `ChangeJump` is
 the zero value and must not mean "unset" — use `dp.ChangeJump.Ptr()`.
 
@@ -362,7 +363,7 @@ The flow:
    return at once (a send would fail on the cancelled context anyway).
 
 Known limitations: no reconnect if a device drops mid-stream (reported via
-`session.Done()`), and RGB only — no white-mode dragging.
+`session.Done()`), and colour only — no white-mode dragging.
 
 ## Working in this repo
 

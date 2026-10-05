@@ -115,7 +115,7 @@ func TestVerbsWriteTheDocumentedDPs(t *testing.T) {
 	}{
 		{"TurnOn", func(b *Bulb) error { return b.TurnOn(ctx) }, map[string]any{"20": true}},
 		{"TurnOff", func(b *Bulb) error { return b.TurnOff(ctx) }, map[string]any{"20": false}},
-		{"SetColour", func(b *Bulb) error { return b.SetColour(ctx, dp.RGB{R: 255}) },
+		{"SetColour", func(b *Bulb) error { return b.SetColour(ctx, dp.HSV{H: 0, S: 1000, V: 1000}) },
 			map[string]any{"21": "colour", "24": "000003e803e8"}},
 		{"SetWhiteBrightness 0 clamps to 1%", func(b *Bulb) error { return b.SetWhiteBrightness(ctx, 0) },
 			map[string]any{"21": "white", "22": float64(10)}},

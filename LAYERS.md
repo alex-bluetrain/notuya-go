@@ -123,7 +123,7 @@ pure: no I/O, no goroutines.
 
   | DP | Codec |
   |---|---|
-  | 24 colour | `HSV`, with `HSVFromRGB` to convert |
+  | 24 colour | `HSV` (the bulb's native model; no RGB in the library) |
   | 25 scene | `SceneValue`, `SceneUnit` |
   | 27, 28, 29 (music, real-time, debug) | `Adjust` |
   | 30 biorhythm | `Rhythm` |
@@ -133,7 +133,7 @@ pure: no I/O, no goroutines.
 
 - `Schema`: `Schema20`, the standard DP 20+ set (older DP 1–8 bulbs are not
   supported). Its methods return `Values`:
-  `Power`, `Colour`, `ColourHSV`, `White`, `WhitePercent`, `ColourTemp`,
+  `Power`, `Colour`, `White`, `WhitePercent`, `ColourTemp`,
   `ColourTempPercent`, `Scene`, `Timer`, `RealTime`, `MusicSync`,
   `DoNotDisturb`, `Raw`.
 - **Validation.** Every encoder checks the documented ranges (for example,
@@ -150,14 +150,16 @@ Speaks the user's language. Never names a DP number or a message code.
 
 `bulb.New(sess, name)` wraps one open session:
 
-- **Verbs:** `TurnOn`, `TurnOff`, `SetColour(RGB)`, `SetColourHSV`,
+- **Verbs:** `TurnOn`, `TurnOff`, `SetColour(HSV)`,
   `SetWhiteBrightness(%)`, `SetColourTempPercent(%)`, `SetScene`,
   `SetTimer`, `SetDoNotDisturb`, `SetMusicSync`.
 - **Reads:** `Status`, `Capabilities` (the DPs the bulb reports),
   `Refresh`, and `Watch(ctx)`, which delivers pushes as `dp.State`.
 - **Streaming:** `StreamColours(ctx, colours, opts)` sends fire-and-forget
   real-time writes (DP 28), coalesced to one per `opts.Interval` with the
-  newest colour winning. Finish with `SetColour` so the final colour sticks.
+  newest colour winning. `SendLive(ctx, colour, mode)` is one such write, for
+  callers running their own send loop. Finish with `SetColour` so the final
+  colour sticks.
 - **Escape hatches:** `Set(dp.Values)` for any DP, and `Session()` for the
   raw session.
 
@@ -175,9 +177,9 @@ The caller owns the session's lifetime (see `control.go` in notuya-gui).
 
 ## One request, top to bottom
 
-`b.SetColour(ctx, dp.RGB{R: 255})`:
+`b.SetColour(ctx, dp.HSV{H: 0, S: 1000, V: 1000})`:
 
-1. **`bulb`** asks its schema: `Schema20.Colour(rgb)` returns
+1. **`bulb`** asks its schema: `Schema20.Colour(hsv)` returns
    `Values{21: "colour", 24: "000003e803e8"}`.
 2. **`dp`** validates the values and wraps them:
    `Body(...)` → `{"protocol":5,"t":…,"data":{"dps":{…}}}`.

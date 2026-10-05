@@ -56,13 +56,7 @@ var Schema20 = Schema{Switch, Mode, Brightness, ColourTemp, Colour, Scene, Timer
 func (s Schema) Power(on bool) Values { return Values{s.SwitchDP: on} }
 
 // Colour switches to colour mode and sets c.
-func (s Schema) Colour(c RGB) Values {
-	h, _ := HSVFromRGB(c).Hex() // always in range
-	return Values{s.ModeDP: string(ModeColour), s.ColourDP: h}
-}
-
-// ColourHSV switches to colour mode and sets c.
-func (s Schema) ColourHSV(c HSV) (Values, error) {
+func (s Schema) Colour(c HSV) (Values, error) {
 	h, err := c.Hex()
 	if err != nil {
 		return nil, err
