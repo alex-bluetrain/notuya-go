@@ -164,6 +164,15 @@ DP_QUERY_NEW=0x10        UPDATEDPS=0x12           REQ_DEVINFO=0x25
 | 28 | control_data | hex string, write-only | `t` + `hhhhssssvvvv` + `bbbb` + `cccc` (see below) |
 | 34 | do_not_disturb | bool | on/off |
 
+**DP 22 is white-mode brightness only, and the bulb enforces it.** On the
+A60TY10W, writing a bare DP 22 (`{"22":n}`, no DP 21) makes the firmware
+switch `work_mode` to `white` on its own — verified against the device,
+reading back DP 21 after the write. So there is no "colour-mode brightness"
+via DP 22: colour brightness is the `vvvv` field of DP 24 / DP 28 only.
+This matches Tuya's docs listing DP 22 as required for the White menu; the
+hardware treats it as exclusively white-mode. A caller that wants to keep
+colour mode must not write DP 22.
+
 **DP 24 is NOT JSON on the wire** — it is a 12-character ASCII hex string.
 E.g. pure red = `"000003e803e8"`. It travels as the value of key `"24"`
 inside the control JSON: `{"20":true,"21":"colour","24":"016903e803e8"}`.

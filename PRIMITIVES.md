@@ -29,6 +29,12 @@ Notes from the page:
 - **21:** the in-app menus depend on the DPs a product has: white needs 21 + 22,
   color needs 21 + 24, scene needs 21 + 25, music needs 21 + 27, and the timer
   needs 26.
+- **22 (observed, A60TY10W):** DP 22 is white-mode brightness only, and the
+  bulb enforces it. Writing a bare DP 22 (`{"22":n}`, no DP 21) makes the
+  firmware switch `work_mode` to `white` on its own — verified by reading
+  back DP 21 after the write. There is no colour-mode brightness via DP 22;
+  colour brightness is the `vvvv` field of DP 24 / DP 28. This matches the
+  page note above: DP 22 belongs to the white menu.
 - **23:** the range spans coolest to warmest white; the actual temperature
   depends on the LEDs (e.g. 2700K–6500K). The page's summary table says
   10–1000; its DP description says 0–1000.
